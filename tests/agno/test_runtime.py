@@ -11,7 +11,11 @@ from agent_kernel.core.results import (
     Failed,
     Pause,
 )
-from agent_kernel.integrations.agno import AgnoRunContext, AgnoRuntime
+from agent_kernel.integrations.agno import (
+    AgnoRunContext,
+    AgnoRuntime,
+    authority_hook,
+)
 
 
 class FakeAgent:
@@ -101,6 +105,7 @@ def test_runtime_exposes_only_planned_tools_in_deterministic_order(plan):
 
     assert factory.last_kwargs["tools"] == [alpha_tool, zeta_tool]
     assert factory.last_kwargs["tool_call_limit"] == 2
+    assert factory.last_kwargs["tool_hooks"] == [authority_hook]
 
 
 def test_runtime_forwards_model_db_and_plan_instructions(plan):
@@ -144,6 +149,9 @@ def test_runtime_forwards_explicit_run_context_fields(plan):
                 "session_id": "session-7",
                 "session_state": {"recent": ["hello"]},
                 "metadata": {"request_id": "request-9"},
+                "dependencies": {
+                    "agent_kernel_authority": plan.envelope,
+                },
             },
         )
     ]
@@ -158,7 +166,16 @@ def test_runtime_omits_context_fields_when_context_is_not_supplied(plan):
 
     runtime.execute("spin", plan)
 
-    assert factory.agents[0].run_calls == [("spin", {})]
+    assert factory.agents[0].run_calls == [
+        (
+            "spin",
+            {
+                "dependencies": {
+                    "agent_kernel_authority": plan.envelope,
+                },
+            },
+        )
+    ]
 
 
 def test_runtime_returns_completed_response(plan):
@@ -174,7 +191,11 @@ def test_runtime_returns_completed_response(plan):
 
 
 def test_runtime_minimally_translates_paused_response(plan):
-    response = SimpleNamespace(content=None, is_paused=True)
+    response = SimpleNamespace(
+        content=None,
+        is_paused=True,
+        requirements=[],
+    )
     context = AgnoRunContext(user_id="member-1", session_id="session-7")
     runtime = AgnoRuntime(
         tools={"alpha_tool": object(), "zeta_tool": object()},
