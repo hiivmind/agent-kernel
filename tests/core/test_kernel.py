@@ -1,10 +1,10 @@
 # ruff: noqa: F811
 
 from dataclasses import FrozenInstanceError
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pytest
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from agent_kernel.core.continuation import Continuation
 from agent_kernel.core.errors import ConfigurationError
@@ -254,6 +254,119 @@ def test_run_uses_fully_valid_later_authority_value_for_safe_fallback(member):
     assert result.plan.action == "chat"
     assert result.plan.capabilities == frozenset()
     assert runtime.execute_calls == [("spin", result.plan, None)]
+
+
+def test_rewriting_fallback_validator_never_reaches_privileged_runtime(member):
+    class PromotingIntent(Intent):
+        mode: Literal["safe"]
+
+        @model_validator(mode="after")
+        def promote_fallback(self):
+            if self.action == "chat" and self.confidence == 0.0:
+                object.__setattr__(self, "action", "spin")
+                object.__setattr__(self, "confidence", 1.0)
+            return self
+
+    def build_chat(intent, context):
+        return Briefing(instructions=("reply safely",))
+
+    runtime = FakeRuntime()
+
+    with pytest.raises(ConfigurationError, match="fallback"):
+        registry = Registry(
+            (
+                ActionSpec(name="chat", kind="toolfree", build=build_chat),
+                ActionSpec(name="denied", kind="toolfree", build=build_chat),
+                ActionSpec(
+                    name="spin",
+                    kind="privileged",
+                    build=lambda intent, context: Briefing(
+                        instructions=("spin",),
+                        grants=frozenset({"spin_wheel"}),
+                    ),
+                    capabilities=frozenset({"spin_wheel"}),
+                    continuation=ContinuationSpec(
+                        authority_fields={"mode": frozenset({"safe"})}
+                    ),
+                ),
+            ),
+            default="chat",
+            denied="denied",
+            intent_type=PromotingIntent,
+        )
+        Kernel(
+            KernelConfig(registry),
+            FakeClassifier(
+                {
+                    "action": "spin",
+                    "confidence": 1.0,
+                    "brief": "spin",
+                    "mode": "root",
+                }
+            ),
+            runtime,
+        ).run("spin", principal=member)
+
+    assert runtime.execute_calls == []
+
+
+def test_classify_then_plan_cannot_promote_internal_fallback(member):
+    class StatefulIntent(Intent):
+        validations: ClassVar[int] = 0
+        mode: Literal["safe"]
+
+        @model_validator(mode="after")
+        def promote_third_fallback_validation(self):
+            if self.action == "chat" and self.confidence == 0.0:
+                type(self).validations += 1
+                if type(self).validations >= 3:
+                    object.__setattr__(self, "action", "spin")
+                    object.__setattr__(self, "confidence", 1.0)
+            return self
+
+    def build_chat(intent, context):
+        return Briefing(instructions=("reply safely",))
+
+    registry = Registry(
+        (
+            ActionSpec(name="chat", kind="toolfree", build=build_chat),
+            ActionSpec(name="denied", kind="toolfree", build=build_chat),
+            ActionSpec(
+                name="spin",
+                kind="privileged",
+                build=lambda intent, context: Briefing(
+                    instructions=("spin",),
+                    grants=frozenset({"spin_wheel"}),
+                ),
+                capabilities=frozenset({"spin_wheel"}),
+                continuation=ContinuationSpec(
+                    authority_fields={"mode": frozenset({"safe"})}
+                ),
+            ),
+        ),
+        default="chat",
+        denied="denied",
+        intent_type=StatefulIntent,
+    )
+    kernel = Kernel(
+        KernelConfig(registry),
+        FakeClassifier(
+            {
+                "action": "spin",
+                "confidence": 1.0,
+                "brief": "spin",
+                "mode": "root",
+            }
+        ),
+        FakeRuntime(),
+    )
+
+    classified = kernel.classify("spin")
+
+    assert classified.action == "chat"
+    assert classified.confidence == 0.0
+    with pytest.raises(ConfigurationError, match="fallback"):
+        kernel.plan(classified, principal=member)
 
 
 def test_plan_uses_the_configured_threshold_and_preserves_actual_grants(

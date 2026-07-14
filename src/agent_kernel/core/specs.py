@@ -2,6 +2,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import product
+from math import isfinite
 from types import MappingProxyType
 from typing import Generic, Literal, TypeVar
 
@@ -13,6 +14,7 @@ from agent_kernel.core.intents import Intent
 I = TypeVar("I", bound=Intent)  # noqa: E741
 
 _MAX_FALLBACK_CANDIDATES = 4096
+_FALLBACK_MARKER = "_agent_kernel_invalid_fallback"
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,14 @@ class Registry(Generic[I]):
                 validated_fallback = intent_type.model_validate(candidate)
             except ValidationError:
                 continue
+            if (
+                validated_fallback.action != default
+                or not isfinite(validated_fallback.confidence)
+                or validated_fallback.confidence != 0.0
+            ):
+                raise ConfigurationError(
+                    "validated fallback intent changed its safety invariants"
+                )
             break
         if validated_fallback is None:
             raise ConfigurationError(
@@ -185,15 +195,33 @@ class Registry(Generic[I]):
     def get(self, action: str) -> ActionSpec[I] | None:
         return self._specs.get(action)
 
+    def _check_fallback_invariants(self, intent: I) -> None:
+        if (
+            intent.action != self.default
+            or not isfinite(intent.confidence)
+            or intent.confidence != 0.0
+        ):
+            raise ConfigurationError(
+                "validated fallback intent changed its safety invariants"
+            )
+
     def normalize_intent(self, value: object) -> tuple[I, bool]:
+        force_fallback = bool(getattr(value, _FALLBACK_MARKER, False))
         serialized = value.model_dump() if isinstance(value, BaseModel) else value
-        try:
-            return self.intent_type.model_validate(serialized), True
-        except ValidationError as exc:
-            if not isinstance(serialized, dict):
-                raise ConfigurationError("invalid intent") from exc
-            fallback = deepcopy(dict(self._fallback_payload))
+        validation_error: ValidationError | None = None
+        if not force_fallback:
             try:
-                return self.intent_type.model_validate(fallback), False
-            except ValidationError as fallback_exc:
-                raise ConfigurationError("invalid intent") from fallback_exc
+                return self.intent_type.model_validate(serialized), True
+            except ValidationError as exc:
+                validation_error = exc
+
+        if not isinstance(serialized, dict):
+            raise ConfigurationError("invalid intent") from validation_error
+        fallback = deepcopy(dict(self._fallback_payload))
+        try:
+            normalized = self.intent_type.model_validate(fallback)
+        except ValidationError as fallback_exc:
+            raise ConfigurationError("invalid intent") from fallback_exc
+        self._check_fallback_invariants(normalized)
+        object.__setattr__(normalized, _FALLBACK_MARKER, True)
+        return normalized, False
