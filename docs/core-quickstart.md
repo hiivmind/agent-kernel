@@ -1,18 +1,15 @@
-# agent-kernel
+# Core quickstart
 
-`agent-kernel` is a framework-neutral authority kernel for capability-gated
-agents. A typed registry describes logical actions and their maximum
-capabilities; a principal supplies the available authority; adapters classify
-and execute one bounded turn.
-
-Requires Python 3.12 or newer.
+Install the framework-neutral core:
 
 ```bash
 python -m pip install agent-kernel
 ```
 
-The core package has no agent-framework dependency. See the complete
-network-free example below and the focused guides for Agno and DSPy usage.
+An `ActionSpec` is tool-free or privileged. A privileged action declares its
+maximum logical capabilities in `capabilities`; its builder selects the grants
+for the current turn. The kernel bounds that plan with the principal's role
+before the runtime sees it.
 
 ```python
 from agent_kernel import (
@@ -79,15 +76,23 @@ class FakeRuntime:
         return Completed(content=answers, raw=None)
 
 
-kernel = Kernel(KernelConfig(registry), FakeClassifier(), FakeRuntime())
+kernel = Kernel(
+    KernelConfig(registry, confidence_threshold=0.75, identity="Spinner"),
+    FakeClassifier(),
+    FakeRuntime(),
+)
 principal = Principal(
     id="member-1",
     role=Role(name="member", capabilities=frozenset({"spin_wheel"})),
 )
 turn = kernel.run("Please spin the wheel", principal=principal)
-print(turn.plan.action, turn.plan.capabilities, turn.outcome)
+assert turn.plan.action == "spin"
+assert turn.plan.capabilities == frozenset({"spin_wheel"})
+print(turn.outcome)
 ```
 
-- [Core quickstart](docs/core-quickstart.md)
-- [Agno quickstart](docs/agno-quickstart.md)
-- [DSPy classifiers and artifacts](docs/dspy.md)
+The registry's `default` and `denied` actions must both be tool-free. Unknown
+actions and low-confidence privileged classifications fall back to `default`.
+If selected grants exceed the principal's capabilities, the kernel selects
+`denied`. Plans contain logical capability names only; concrete tool binding
+belongs to a runtime adapter.

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest tests/core tests/imports tests/public -v
+
+  agno:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[agno,dev]"
+      - run: python -m pytest tests/agno -v
+
+  dspy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+        install: ["dspy", "agno,dspy"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[${{ matrix.install }},dev]"
+      - if: matrix.install == 'dspy'
+        run: python -m pytest tests/dspy -v
+      - if: matrix.install == 'agno,dspy'
+        run: python -m pytest tests/core tests/imports tests/public tests/agno tests/dspy -v
+
+  quality-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[agno,dspy,dev]"
+      - run: python -m ruff check src tests examples
+      - run: python -m mypy src/agent_kernel
+      - run: python -m build
+      - name: Test wheel in a clean environment
+        run: |
+          python -m venv "${RUNNER_TEMP}/wheel-test"
+          "${RUNNER_TEMP}/wheel-test/bin/python" -m pip install dist/*.whl
+          "${RUNNER_TEMP}/wheel-test/bin/python" examples/spinner.py
