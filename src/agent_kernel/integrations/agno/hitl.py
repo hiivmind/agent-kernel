@@ -1,4 +1,5 @@
 from typing import Any
+from copy import deepcopy
 
 
 class UnsupportedRequirement(ValueError):
@@ -26,6 +27,31 @@ def _requirement_type(requirement: object) -> str:
     if getattr(requirement, "needs_user_input", False):
         return "user_input"
     return "unknown"
+
+
+def requirement_state(response: object) -> tuple[object, ...]:
+    state: list[tuple[object, ...]] = []
+    for requirement in _active_requirements(response):
+        serialize = getattr(requirement, "to_dict", None)
+        serialized = deepcopy(serialize()) if callable(serialize) else None
+        fields = tuple(
+            (
+                id(field),
+                getattr(field, "name", None),
+                getattr(field, "description", None),
+                repr(getattr(field, "field_type", None)),
+            )
+            for field in getattr(requirement, "user_input_schema", None) or ()
+        )
+        state.append(
+            (
+                id(requirement),
+                _requirement_type(requirement),
+                fields,
+                serialized,
+            )
+        )
+    return (bool(getattr(response, "is_paused", False)), tuple(state))
 
 
 def translate_requirements(

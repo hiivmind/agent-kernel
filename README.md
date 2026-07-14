@@ -88,6 +88,6 @@ turn = kernel.run("Please spin the wheel", principal=principal)
 print(turn.plan.action, turn.plan.capabilities, turn.outcome)
 ```
 
-- [Core quickstart](docs/core-quickstart.md)
-- [Agno quickstart](docs/agno-quickstart.md)
-- [DSPy classifiers and artifacts](docs/dspy.md)
+- [Core quickstart](https://github.com/hiivmind/agent-kernel/blob/main/docs/core-quickstart.md)
+- [Agno quickstart](https://github.com/hiivmind/agent-kernel/blob/main/docs/agno-quickstart.md)
+- [DSPy classifiers and artifacts](https://github.com/hiivmind/agent-kernel/blob/main/docs/dspy.md)

@@ -17,6 +17,7 @@ from agent_kernel.integrations.agno.context import AgnoRunContext
 from agent_kernel.integrations.agno.hitl import (
     UnsupportedRequirement,
     apply_user_input,
+    requirement_state,
     translate_requirements,
 )
 from agent_kernel.integrations.agno.hooks import authority_hook
@@ -28,6 +29,7 @@ class _PauseRecord:
     agent: Any
     envelope: AuthorityEnvelope
     context: AgnoRunContext | None
+    requirement_state: tuple[object, ...]
 
 
 class AgnoRuntime:
@@ -59,6 +61,7 @@ class AgnoRuntime:
             agent=agent,
             envelope=envelope,
             context=context,
+            requirement_state=requirement_state(response),
         )
         return Pause(
             requirements=requirements,
@@ -137,6 +140,10 @@ class AgnoRuntime:
         if pause.envelope != record.envelope:
             raise ConfigurationError(
                 "pause authority envelope does not match the original run"
+            )
+        if requirement_state(response) != record.requirement_state:
+            raise ConfigurationError(
+                "paused Agno response state does not match the original run"
             )
 
         try:

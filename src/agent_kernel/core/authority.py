@@ -38,9 +38,12 @@ class Planner(Generic[I]):
             )
 
     def plan(self, intent: I, principal: Principal) -> ExecutionPlan:
+        intent, valid = self.registry.normalize_intent(intent)
         spec = self.registry.get(intent.action)
-        reason = None
-        if spec is None:
+        reason = None if valid else "invalid intent"
+        if not valid:
+            spec = self.registry.get(self.registry.default)
+        elif spec is None:
             reason = f"unknown action: {intent.action}"
             spec = self.registry.get(self.registry.default)
         elif (

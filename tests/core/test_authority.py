@@ -93,6 +93,167 @@ def test_default_plan_has_empty_authority_envelope(example, member):
     )
 
 
+def test_plan_snapshots_mutable_capability_collections(example):
+    declared = {"spin_wheel"}
+    granted = {"spin_wheel"}
+
+    def build_mutable(intent: ExampleIntent, context) -> Briefing:
+        return Briefing(
+            instructions=["spin once"],  # type: ignore[arg-type]
+            grants=granted,  # type: ignore[arg-type]
+        )
+
+    mutable = ActionSpec(
+        name="mutable",
+        kind="privileged",
+        build=build_mutable,
+        capabilities=declared,  # type: ignore[arg-type]
+    )
+    registry = Registry(
+        example.registry.specs + (mutable,),
+        default=example.registry.default,
+        denied=example.registry.denied,
+        intent_type=example.intent_type,
+    )
+    role_capabilities = {"spin_wheel"}
+    principal = Principal(
+        id="member-1",
+        role=Role(
+            name="member",
+            capabilities=role_capabilities,  # type: ignore[arg-type]
+        ),
+    )
+
+    plan = Planner(registry, confidence_threshold=0.75).plan(
+        example.intent_type(action="mutable", confidence=1, brief="spin"),
+        principal,
+    )
+    declared.add("delete_world")
+    granted.add("delete_world")
+    role_capabilities.add("delete_world")
+
+    assert plan.capabilities == frozenset({"spin_wheel"})
+    assert plan.envelope.allowed == plan.capabilities
+    assert plan.instructions == ("spin once",)
+
+
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        (
+            lambda: Role(name="member", capabilities={""}),  # type: ignore[arg-type]
+            "role capabilities",
+        ),
+        (
+            lambda: ActionSpec(
+                name="bad",
+                kind="privileged",
+                build=lambda intent, context: Briefing(instructions=("x",)),
+                capabilities={1},  # type: ignore[arg-type]
+            ),
+            "action capabilities",
+        ),
+        (
+            lambda: ActionSpec(
+                name="bad",
+                kind="privileged",
+                build=lambda intent, context: Briefing(instructions=("x",)),
+                capabilities=1,  # type: ignore[arg-type]
+            ),
+            "action capabilities",
+        ),
+        (
+            lambda: ActionSpec(
+                name="bad",
+                kind="privileged",
+                build=lambda intent, context: Briefing(instructions=("x",)),
+                capabilities="root",  # type: ignore[arg-type]
+            ),
+            "action capabilities",
+        ),
+        (
+            lambda: Briefing(
+                instructions=("x",),
+                grants={" "},  # type: ignore[arg-type]
+            ),
+            "briefing grants",
+        ),
+    ],
+)
+def test_capability_boundaries_reject_invalid_names(factory, message):
+    with pytest.raises(ConfigurationError, match=message):
+        factory()
+
+
+def test_execution_plan_rejects_capabilities_that_differ_from_envelope():
+    from agent_kernel.core.results import ExecutionPlan
+
+    with pytest.raises(ConfigurationError, match="envelope"):
+        ExecutionPlan(
+            action="spin",
+            label="Spin",
+            capabilities=frozenset({"spin_wheel"}),
+            instructions=("spin",),
+            tool_call_limit=1,
+            reads_history=False,
+            envelope=AuthorityEnvelope("member-1", frozenset()),
+            reason=None,
+        )
+
+
+@pytest.mark.parametrize("confidence", [float("nan"), float("inf"), float("-inf")])
+def test_mutated_non_finite_confidence_falls_closed(example, member, confidence):
+    intent = example.intent_type(
+        action="spin",
+        confidence=1,
+        brief="spin",
+        mode="safe",
+    )
+    intent.confidence = confidence
+
+    plan = example.planner.plan(intent, member)
+
+    assert plan.action == "chat"
+    assert plan.capabilities == frozenset()
+    assert plan.envelope.allowed == frozenset()
+    assert plan.reason == "invalid intent"
+
+
+def test_builder_can_use_catalog_and_summary_without_recursive_planning(
+    example,
+    member,
+):
+    observed = {}
+
+    def build_visible(intent: ExampleIntent, context) -> Briefing:
+        observed["catalog"] = context.catalog()
+        observed["summary"] = context.summary()
+        return Briefing(instructions=("show the catalog",))
+
+    visible = ActionSpec(
+        name="visible",
+        kind="toolfree",
+        build=build_visible,
+        catalog=example.registry.get("chat").catalog,
+    )
+    registry = Registry(
+        example.registry.specs + (visible,),
+        default=example.registry.default,
+        denied=example.registry.denied,
+        intent_type=example.intent_type,
+    )
+    planner = Planner(registry, confidence_threshold=0.75)
+
+    plan = planner.plan(
+        example.intent_type(action="visible", confidence=1, brief="show"),
+        member,
+    )
+
+    assert plan.action == "visible"
+    assert observed["catalog"]
+    assert "chat" in observed["summary"]
+
+
 def test_builder_cannot_grant_undeclared_capability(example, member):
     def build_rogue(intent: ExampleIntent, context) -> Briefing:
         return Briefing(

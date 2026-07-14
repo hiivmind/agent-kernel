@@ -20,18 +20,21 @@ class ArtifactModule(Protocol):
 M = TypeVar("M", bound=ArtifactModule)
 
 
-def _authority_vocabularies(registry: Registry[Any]) -> dict[str, list[str]]:
-    vocabularies: dict[str, set[str]] = {}
+def _authority_vocabularies(
+    registry: Registry[Any],
+) -> dict[str, dict[str, list[str]]]:
+    vocabularies: dict[str, dict[str, list[str]]] = {}
     for spec in registry.specs:
         continuation = spec.continuation
         if continuation is None:
             continue
-        for field_name, values in continuation.authority_fields.items():
-            vocabularies.setdefault(field_name, set()).update(values)
-    return {
-        field_name: sorted(values)
-        for field_name, values in sorted(vocabularies.items())
-    }
+        vocabularies[spec.name] = {
+            field_name: sorted(values)
+            for field_name, values in sorted(
+                continuation.authority_fields.items()
+            )
+        }
+    return dict(sorted(vocabularies.items()))
 
 
 def registry_fingerprint(registry: Registry[Any]) -> str:

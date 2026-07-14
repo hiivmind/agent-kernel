@@ -18,15 +18,10 @@ def describe(
 ) -> tuple[dict[str, str | None], ...]:
     visible: list[CatalogEntry] = []
     for spec in planner.registry.specs:
-        probe = planner.registry.intent_type.model_validate(
-            {
-                "action": spec.name,
-                "confidence": 1.0,
-                "brief": "",
-            }
-        )
-        plan = planner.plan(probe, principal)
-        if plan.action == planner.registry.denied:
+        if (
+            spec.kind == "privileged"
+            and not spec.capabilities <= principal.role.capabilities
+        ):
             continue
         visible.extend(spec.catalog)
 

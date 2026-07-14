@@ -113,6 +113,26 @@ def test_classify_normalizes_classifier_output_and_forwards_context(example):
     assert classifier.calls == [("please spin", context)]
 
 
+def test_classify_revalidates_an_existing_mutated_intent(example):
+    classified = ExampleIntent(
+        action="spin",
+        confidence=1.0,
+        brief="spin request",
+        mode="safe",
+    )
+    classified.confidence = float("nan")
+    kernel, _, _ = make_kernel(
+        example,
+        classifier=FakeClassifier(classified),
+    )
+
+    intent = kernel.classify("please spin")
+
+    assert intent is not classified
+    assert intent.action == "chat"
+    assert intent.confidence == 0.0
+
+
 def test_plan_uses_the_configured_threshold_and_preserves_actual_grants(
     example,
     member,

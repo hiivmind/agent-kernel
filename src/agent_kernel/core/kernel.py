@@ -62,7 +62,8 @@ class Kernel(Generic[I]):
         context: Continuation | None = None,
     ) -> I:
         classified = self.classifier.classify(message, context=context)
-        return self.config.registry.intent_type.model_validate(classified)
+        normalized, _ = self.config.registry.normalize_intent(classified)
+        return normalized
 
     def plan(self, intent: I, *, principal: Principal) -> ExecutionPlan:
         return self._planner.plan(intent, principal)
@@ -109,7 +110,7 @@ class Kernel(Generic[I]):
         principal: Principal,
         runtime_context: object | None = None,
     ) -> TurnResult:
-        normalized = self.config.registry.intent_type.model_validate(intent)
+        normalized, _ = self.config.registry.normalize_intent(intent)
         plan = self.plan(normalized, principal=principal)
         outcome = self._execute(
             normalized.brief,

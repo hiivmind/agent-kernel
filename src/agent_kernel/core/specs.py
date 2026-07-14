@@ -1,7 +1,10 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Generic, Literal, TypeVar
 
+from pydantic import BaseModel, ValidationError
+from agent_kernel.core._validation import capability_set, string_tuple
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
 
@@ -14,6 +17,18 @@ class Briefing:
     grants: frozenset[str] = frozenset()
     tool_call_limit: int | None = None
     label: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "instructions",
+            string_tuple(self.instructions, field="briefing instructions"),
+        )
+        object.__setattr__(
+            self,
+            "grants",
+            capability_set(self.grants, field="briefing grants"),
+        )
 
 
 @dataclass(frozen=True)
@@ -42,7 +57,25 @@ class CommandSpec(Generic[I]):
 @dataclass(frozen=True)
 class ContinuationSpec:
     awaiting: tuple[str, ...] = ()
-    authority_fields: dict[str, frozenset[str]] = field(default_factory=dict)
+    authority_fields: Mapping[str, frozenset[str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "awaiting",
+            string_tuple(self.awaiting, field="continuation awaiting"),
+        )
+        snapshot: dict[str, frozenset[str]] = {}
+        for field_name, values in self.authority_fields.items():
+            if not isinstance(field_name, str) or not field_name.strip():
+                raise ConfigurationError(
+                    "continuation authority fields must be non-empty strings"
+                )
+            snapshot[field_name] = capability_set(
+                values,
+                field="continuation authority values",
+            )
+        object.__setattr__(self, "authority_fields", MappingProxyType(snapshot))
 
 
 @dataclass(frozen=True)
@@ -56,6 +89,14 @@ class ActionSpec(Generic[I]):
     catalog: tuple[CatalogEntry, ...] = ()
     command: CommandSpec[I] | None = None
     continuation: ContinuationSpec | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "capabilities",
+            capability_set(self.capabilities, field="action capabilities"),
+        )
+        object.__setattr__(self, "catalog", tuple(self.catalog))
 
 
 class Registry(Generic[I]):
@@ -85,3 +126,18 @@ class Registry(Generic[I]):
 
     def get(self, action: str) -> ActionSpec[I] | None:
         return self._specs.get(action)
+
+    def normalize_intent(self, value: object) -> tuple[I, bool]:
+        serialized = value.model_dump() if isinstance(value, BaseModel) else value
+        try:
+            return self.intent_type.model_validate(serialized), True
+        except ValidationError as exc:
+            if not isinstance(serialized, dict):
+                raise ConfigurationError("invalid intent") from exc
+            fallback = dict(serialized)
+            fallback["action"] = self.default
+            fallback["confidence"] = 0.0
+            try:
+                return self.intent_type.model_validate(fallback), False
+            except ValidationError as fallback_exc:
+                raise ConfigurationError("invalid intent") from fallback_exc

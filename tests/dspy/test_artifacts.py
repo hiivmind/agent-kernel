@@ -1,6 +1,7 @@
 # ruff: noqa: F811
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import dspy
@@ -8,6 +9,7 @@ import pytest
 
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.specs import Registry
+from agent_kernel.core.specs import ContinuationSpec
 from agent_kernel.integrations.dspy import (
     DspyClassifier,
     build_signature,
@@ -103,6 +105,51 @@ def test_load_artifact_rejects_registry_mismatch_before_dspy_load(
         )
 
     assert target.load_calls == []
+
+
+def test_registry_fingerprint_binds_authority_values_to_each_action(example):
+    spin_safe = replace(
+        SPIN,
+        continuation=ContinuationSpec(
+            authority_fields={"mode": frozenset({"safe"})}
+        ),
+    )
+    review_fast = replace(
+        SPIN,
+        name="review",
+        continuation=ContinuationSpec(
+            authority_fields={"mode": frozenset({"fast"})}
+        ),
+    )
+    first = Registry(
+        (CHAT, DENIED, spin_safe, review_fast),
+        default="chat",
+        denied="denied",
+        intent_type=ExampleIntent,
+    )
+    second = Registry(
+        (
+            CHAT,
+            DENIED,
+            replace(
+                spin_safe,
+                continuation=ContinuationSpec(
+                    authority_fields={"mode": frozenset({"fast"})}
+                ),
+            ),
+            replace(
+                review_fast,
+                continuation=ContinuationSpec(
+                    authority_fields={"mode": frozenset({"safe"})}
+                ),
+            ),
+        ),
+        default="chat",
+        denied="denied",
+        intent_type=ExampleIntent,
+    )
+
+    assert registry_fingerprint(first) != registry_fingerprint(second)
 
 
 @pytest.mark.parametrize(

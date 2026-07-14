@@ -1,11 +1,21 @@
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from agent_kernel.core._validation import capability_set, string_tuple
+from agent_kernel.core.errors import ConfigurationError
+
 
 @dataclass(frozen=True)
 class Role:
     name: str
     capabilities: frozenset[str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "capabilities",
+            capability_set(self.capabilities, field="role capabilities"),
+        )
 
 
 @dataclass(frozen=True)
@@ -19,6 +29,13 @@ class AuthorityEnvelope:
     principal_id: str
     allowed: frozenset[str]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "allowed",
+            capability_set(self.allowed, field="authority envelope allowed"),
+        )
+
 
 @dataclass(frozen=True)
 class ExecutionPlan:
@@ -30,6 +47,22 @@ class ExecutionPlan:
     reads_history: bool
     envelope: AuthorityEnvelope
     reason: str | None
+
+    def __post_init__(self) -> None:
+        capabilities = capability_set(
+            self.capabilities,
+            field="execution plan capabilities",
+        )
+        object.__setattr__(self, "capabilities", capabilities)
+        object.__setattr__(
+            self,
+            "instructions",
+            string_tuple(self.instructions, field="execution plan instructions"),
+        )
+        if capabilities != self.envelope.allowed:
+            raise ConfigurationError(
+                "execution plan capabilities must equal authority envelope allowed"
+            )
 
 
 @dataclass(frozen=True)

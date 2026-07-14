@@ -41,9 +41,16 @@ class FakeRequirement:
         self.needs_confirmation = confirmation
         self.needs_external_execution = external_execution
         self.provided = []
+        self.tool_args = {"wheel": "classic"}
 
     def provide_user_input(self, answers):
         self.provided.append(answers)
+
+    def to_dict(self):
+        return {
+            "tool_args": dict(self.tool_args),
+            "fields": [field.name for field in self.user_input_schema],
+        }
 
 
 def paused_response(*requirements):
@@ -231,6 +238,58 @@ def test_resume_rejects_tampered_envelope_before_continuing(plan):
 
     with pytest.raises(ConfigurationError, match="envelope"):
         runtime.resume(tampered, {"sides": "d20"})
+
+    assert factory.agents[0].continue_calls == []
+
+
+def test_resume_rejects_in_place_mutation_of_paused_requirements(plan):
+    field = FakeField("sides")
+    requirement = FakeRequirement([field])
+    response = paused_response(requirement)
+    factory = FakeAgentFactory(
+        response,
+        continue_responses=[completed_response()],
+    )
+    runtime = make_runtime(factory)
+    pause = runtime.execute("spin", plan)
+    field.name = "delete_world"
+
+    with pytest.raises(ConfigurationError, match="state"):
+        runtime.resume(pause, {"delete_world": "yes"})
+
+    assert requirement.provided == []
+    assert factory.agents[0].continue_calls == []
+
+
+def test_resume_rejects_mutated_pause_status(plan):
+    response = paused_response(FakeRequirement([FakeField("sides")]))
+    factory = FakeAgentFactory(
+        response,
+        continue_responses=[completed_response()],
+    )
+    runtime = make_runtime(factory)
+    pause = runtime.execute("spin", plan)
+    response.is_paused = False
+
+    with pytest.raises(ConfigurationError, match="state"):
+        runtime.resume(pause, {"sides": "d20"})
+
+    assert factory.agents[0].continue_calls == []
+
+
+def test_resume_rejects_mutated_paused_tool_arguments(plan):
+    requirement = FakeRequirement([FakeField("sides")])
+    response = paused_response(requirement)
+    factory = FakeAgentFactory(
+        response,
+        continue_responses=[completed_response()],
+    )
+    runtime = make_runtime(factory)
+    pause = runtime.execute("spin", plan)
+    requirement.tool_args["wheel"] = "delete_world"
+
+    with pytest.raises(ConfigurationError, match="state"):
+        runtime.resume(pause, {"sides": "d20"})
 
     assert factory.agents[0].continue_calls == []
 
