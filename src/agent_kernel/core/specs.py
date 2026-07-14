@@ -169,9 +169,8 @@ class Registry(Generic[I]):
                 or not isfinite(validated_fallback.confidence)
                 or validated_fallback.confidence != 0.0
             ):
-                raise ConfigurationError(
-                    "validated fallback intent changed its safety invariants"
-                )
+                validated_fallback = None
+                continue
             break
         if validated_fallback is None:
             raise ConfigurationError(

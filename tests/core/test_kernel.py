@@ -310,6 +310,68 @@ def test_rewriting_fallback_validator_never_reaches_privileged_runtime(member):
     assert runtime.execute_calls == []
 
 
+def test_registry_skips_promoted_candidate_and_uses_later_safe_fallback(member):
+    class PartiallyPromotingIntent(Intent):
+        mode: Literal["fast", "safe"]
+
+        @model_validator(mode="after")
+        def promote_only_fast(self):
+            if (
+                self.action == "chat"
+                and self.confidence == 0.0
+                and self.mode == "fast"
+            ):
+                object.__setattr__(self, "action", "spin")
+                object.__setattr__(self, "confidence", 1.0)
+            return self
+
+    def build_chat(intent, context):
+        return Briefing(instructions=("reply safely",))
+
+    runtime = FakeRuntime()
+    registry = Registry(
+        (
+            ActionSpec(name="chat", kind="toolfree", build=build_chat),
+            ActionSpec(name="denied", kind="toolfree", build=build_chat),
+            ActionSpec(
+                name="spin",
+                kind="privileged",
+                build=lambda intent, context: Briefing(
+                    instructions=("spin",),
+                    grants=frozenset({"spin_wheel"}),
+                ),
+                capabilities=frozenset({"spin_wheel"}),
+                continuation=ContinuationSpec(
+                    authority_fields={
+                        "mode": frozenset({"fast", "safe"})
+                    }
+                ),
+            ),
+        ),
+        default="chat",
+        denied="denied",
+        intent_type=PartiallyPromotingIntent,
+    )
+    kernel = Kernel(
+        KernelConfig(registry),
+        FakeClassifier(
+            {
+                "action": "spin",
+                "confidence": 1.0,
+                "brief": "spin",
+                "mode": "root",
+            }
+        ),
+        runtime,
+    )
+
+    result = kernel.run("spin", principal=member)
+
+    assert result.plan.action == "chat"
+    assert result.plan.capabilities == frozenset()
+    assert runtime.execute_calls == [("spin", result.plan, None)]
+
+
 def test_classify_then_plan_cannot_promote_internal_fallback(member):
     class StatefulIntent(Intent):
         validations: ClassVar[int] = 0
