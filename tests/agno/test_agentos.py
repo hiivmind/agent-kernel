@@ -84,6 +84,28 @@ async def test_kernel_agent_satisfies_protocol_and_forwards_transport_context():
 
 
 @pytest.mark.asyncio
+async def test_non_stream_without_session_id_forwards_generated_output_identity():
+    kernel = RecordingKernel(Completed(content="hello", raw=None))
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=kernel,
+        principal=PRINCIPAL,
+    )
+
+    output = await agent.arun(
+        "hi",
+        stream=False,
+        user_id="browser-user",
+    )
+
+    assert output.session_id is not None
+    assert len(kernel.calls) == 1
+    runtime_context = kernel.calls[0][3]
+    assert runtime_context.session_id == output.session_id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("outcome", "message"),
     [

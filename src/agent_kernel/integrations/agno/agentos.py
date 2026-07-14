@@ -8,6 +8,7 @@ from agno.agents.base import BaseExternalAgent
 from agno.models.response import ToolExecution
 from agno.run.agent import (
     RunContentEvent,
+    RunOutput,
     RunOutputEvent,
     ToolCallCompletedEvent,
     ToolCallStartedEvent,
@@ -79,6 +80,11 @@ class KernelAgent(BaseExternalAgent):
             session_id=kwargs.get("session_id"),
         )
         return str(completed.content)
+
+    async def _arun_non_stream(self, input: Any, **kwargs: Any) -> RunOutput:
+        if not kwargs.get("session_id"):
+            kwargs["session_id"] = str(uuid4())
+        return await super()._arun_non_stream(input, **kwargs)
 
     @staticmethod
     def _tools(completed: Completed) -> tuple[ToolExecution, ...]:
