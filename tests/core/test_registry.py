@@ -1,4 +1,5 @@
 import pytest
+from typing import Literal
 
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
@@ -58,4 +59,38 @@ def test_continuation_rejects_invalid_authority_vocabulary():
     with pytest.raises(ConfigurationError, match="continuation authority"):
         ContinuationSpec(
             authority_fields={"mode": frozenset({""})},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "values"),
+    [
+        ("missing", frozenset({"safe"})),
+        ("mode", frozenset({"root"})),
+        ("mode", frozenset()),
+    ],
+)
+def test_registry_rejects_unconstructible_authority_vocabulary(
+    field_name,
+    values,
+):
+    class ModeIntent(Intent):
+        mode: Literal["safe", "fast"]
+
+    spin = ActionSpec(
+        name="spin",
+        kind="privileged",
+        build=build_chat,
+        continuation=ContinuationSpec(
+            authority_fields={field_name: values}
+        ),
+    )
+    chat = ActionSpec(name="chat", kind="toolfree", build=build_chat)
+
+    with pytest.raises(ConfigurationError, match="authority"):
+        Registry(
+            (chat, spin),
+            default="chat",
+            denied="chat",
+            intent_type=ModeIntent,
         )

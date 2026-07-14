@@ -1,5 +1,4 @@
 from typing import Any
-from copy import deepcopy
 
 
 class UnsupportedRequirement(ValueError):
@@ -32,8 +31,6 @@ def _requirement_type(requirement: object) -> str:
 def requirement_state(response: object) -> tuple[object, ...]:
     state: list[tuple[object, ...]] = []
     for requirement in _active_requirements(response):
-        serialize = getattr(requirement, "to_dict", None)
-        serialized = deepcopy(serialize()) if callable(serialize) else None
         fields = tuple(
             (
                 id(field),
@@ -48,7 +45,6 @@ def requirement_state(response: object) -> tuple[object, ...]:
                 id(requirement),
                 _requirement_type(requirement),
                 fields,
-                serialized,
             )
         )
     return (bool(getattr(response, "is_paused", False)), tuple(state))

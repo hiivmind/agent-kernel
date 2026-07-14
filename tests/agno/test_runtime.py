@@ -204,12 +204,11 @@ def test_runtime_minimally_translates_paused_response(plan):
 
     outcome = runtime.execute("spin", plan, context=context)
 
-    assert outcome == Pause(
-        requirements=(),
-        adapter_state=response,
-        envelope=plan.envelope,
-        runtime_context=context,
-    )
+    assert isinstance(outcome, Pause)
+    assert outcome.requirements == ()
+    assert outcome.adapter_state is not response
+    assert outcome.envelope == plan.envelope
+    assert outcome.runtime_context == context
 
 
 def test_runtime_exception_becomes_failed(plan):

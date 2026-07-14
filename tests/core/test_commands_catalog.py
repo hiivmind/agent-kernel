@@ -1,10 +1,12 @@
 # ruff: noqa: F811
 
 from dataclasses import replace
+from pathlib import Path
 
+from agent_kernel.core.authority import Planner
 from agent_kernel.core.catalog import describe
 from agent_kernel.core.commands import parse_command
-from agent_kernel.core.specs import CommandSpec, Registry
+from agent_kernel.core.specs import Briefing, CommandSpec, Registry
 from example_registry import ExampleIntent, example, guest, member  # noqa: F401
 
 
@@ -85,3 +87,43 @@ def test_catalog_removes_entry_superseded_by_visible_replacement(example, member
 
     assert "spin" in keys
     assert "classic_spin" not in keys
+
+
+def test_catalog_visibility_uses_conservative_maximum_declared_envelope(
+    example,
+    guest,
+):
+    spin = example.registry.get("spin")
+    assert spin is not None
+    branch_without_grants = replace(
+        spin,
+        build=lambda intent, context: Briefing(instructions=("preview",)),
+    )
+    registry = Registry(
+        tuple(
+            branch_without_grants if spec.name == "spin" else spec
+            for spec in example.registry.specs
+        ),
+        default=example.registry.default,
+        denied=example.registry.denied,
+        intent_type=example.intent_type,
+    )
+
+    keys = {
+        entry["key"]
+        for entry in describe(
+            Planner(registry, confidence_threshold=0.75),
+            guest,
+        )
+    }
+
+    assert "spin" not in keys
+
+
+def test_core_guide_documents_conservative_catalog_visibility():
+    guide = (
+        Path(__file__).parents[2] / "docs/core-quickstart.md"
+    ).read_text(encoding="utf-8")
+
+    assert "catalog visibility is conservative" in guide.lower()
+    assert "maximum declared capabilities" in guide.lower()

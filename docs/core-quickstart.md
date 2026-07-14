@@ -96,3 +96,8 @@ actions and low-confidence privileged classifications fall back to `default`.
 If selected grants exceed the principal's capabilities, the kernel selects
 `denied`. Plans contain logical capability names only; concrete tool binding
 belongs to a runtime adapter.
+
+Catalog visibility is conservative: a privileged action is advertised only
+when the principal holds all of its maximum declared capabilities. Builders
+are not executed while producing a catalog, so a branch that would select
+fewer grants does not make the action visible to a less-privileged principal.

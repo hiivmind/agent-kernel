@@ -1,6 +1,7 @@
 # ruff: noqa: F811
 
 from dataclasses import FrozenInstanceError
+from typing import Literal
 
 import pytest
 
@@ -12,6 +13,13 @@ from agent_kernel.core.results import (
     Completed,
     Failed,
     Pause,
+)
+from agent_kernel.core.intents import Intent
+from agent_kernel.core.specs import (
+    ActionSpec,
+    Briefing,
+    ContinuationSpec,
+    Registry,
 )
 from example_registry import ExampleIntent, example, guest, member  # noqa: F401
 
@@ -131,6 +139,62 @@ def test_classify_revalidates_an_existing_mutated_intent(example):
     assert intent is not classified
     assert intent.action == "chat"
     assert intent.confidence == 0.0
+
+
+def test_run_falls_to_toolfree_default_for_invalid_required_authority_literal(
+    member,
+):
+    class RequiredModeIntent(Intent):
+        mode: Literal["safe", "fast"]
+
+    def build_chat(intent, context):
+        return Briefing(instructions=("reply safely",))
+
+    def build_spin(intent, context):
+        return Briefing(
+            instructions=("spin",),
+            grants=frozenset({"spin_wheel"}),
+        )
+
+    registry = Registry(
+        (
+            ActionSpec(name="chat", kind="toolfree", build=build_chat),
+            ActionSpec(name="denied", kind="toolfree", build=build_chat),
+            ActionSpec(
+                name="spin",
+                kind="privileged",
+                build=build_spin,
+                capabilities=frozenset({"spin_wheel"}),
+                continuation=ContinuationSpec(
+                    authority_fields={
+                        "mode": frozenset({"safe", "fast"})
+                    }
+                ),
+            ),
+        ),
+        default="chat",
+        denied="denied",
+        intent_type=RequiredModeIntent,
+    )
+    runtime = FakeRuntime()
+    kernel = Kernel(
+        KernelConfig(registry),
+        FakeClassifier(
+            {
+                "action": "spin",
+                "confidence": 1.0,
+                "brief": "spin",
+                "mode": "root",
+            }
+        ),
+        runtime,
+    )
+
+    result = kernel.run("spin", principal=member)
+
+    assert result.plan.action == "chat"
+    assert result.plan.capabilities == frozenset()
+    assert runtime.execute_calls == [("spin", result.plan, None)]
 
 
 def test_plan_uses_the_configured_threshold_and_preserves_actual_grants(

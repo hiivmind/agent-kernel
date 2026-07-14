@@ -1,9 +1,9 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from agent_kernel.core._validation import capability_set, string_tuple
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
@@ -112,6 +112,31 @@ class Registry(Generic[I]):
             raise ConfigurationError("default action must be toolfree")
         if self._specs[denied].kind != "toolfree":
             raise ConfigurationError("denied action must be toolfree")
+        authority_values: dict[str, set[str]] = {}
+        for spec in self._specs.values():
+            if spec.continuation is None:
+                continue
+            for field_name, values in spec.continuation.authority_fields.items():
+                model_field = intent_type.model_fields.get(field_name)
+                if model_field is None or not values:
+                    raise ConfigurationError(
+                        f"invalid authority vocabulary for field {field_name!r}"
+                    )
+                adapter: TypeAdapter[Any] = TypeAdapter(model_field.annotation)
+                try:
+                    for value in values:
+                        adapter.validate_python(value)
+                except ValidationError as exc:
+                    raise ConfigurationError(
+                        f"invalid authority vocabulary for field {field_name!r}"
+                    ) from exc
+                authority_values.setdefault(field_name, set()).update(values)
+        self._authority_defaults = MappingProxyType(
+            {
+                field_name: sorted(values)[0]
+                for field_name, values in authority_values.items()
+            }
+        )
         self.default = default
         self.denied = denied
         self.intent_type = intent_type
@@ -137,6 +162,7 @@ class Registry(Generic[I]):
             fallback = dict(serialized)
             fallback["action"] = self.default
             fallback["confidence"] = 0.0
+            fallback.update(self._authority_defaults)
             try:
                 return self.intent_type.model_validate(fallback), False
             except ValidationError as fallback_exc:

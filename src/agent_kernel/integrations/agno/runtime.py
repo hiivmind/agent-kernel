@@ -32,6 +32,10 @@ class _PauseRecord:
     requirement_state: tuple[object, ...]
 
 
+class _PauseToken:
+    __slots__ = ()
+
+
 class AgnoRuntime:
     def __init__(
         self,
@@ -45,7 +49,7 @@ class AgnoRuntime:
         self.tools = dict(tools)
         self.db = db
         self.agent_factory = agent_factory
-        self._pause_records: dict[int, _PauseRecord] = {}
+        self._pause_records: dict[_PauseToken, _PauseRecord] = {}
 
     def _pause(
         self,
@@ -56,7 +60,8 @@ class AgnoRuntime:
         context: AgnoRunContext | None,
     ) -> Pause:
         requirements = translate_requirements(response)
-        self._pause_records[id(response)] = _PauseRecord(
+        token = _PauseToken()
+        self._pause_records[token] = _PauseRecord(
             response=response,
             agent=agent,
             envelope=envelope,
@@ -65,7 +70,7 @@ class AgnoRuntime:
         )
         return Pause(
             requirements=requirements,
-            adapter_state=response,
+            adapter_state=token,
             envelope=envelope,
             runtime_context=context,
         )
@@ -130,13 +135,17 @@ class AgnoRuntime:
         pause: Pause,
         answers: dict[str, str],
     ) -> RuntimeOutcome:
-        response = pause.adapter_state
-        record_key = id(response)
-        record = self._pause_records.get(record_key)
-        if record is None or record.response is not response:
+        record_key = pause.adapter_state
+        if not isinstance(record_key, _PauseToken):
             raise ConfigurationError(
                 "pause state was not created by this Agno runtime"
             )
+        record = self._pause_records.get(record_key)
+        if record is None:
+            raise ConfigurationError(
+                "pause state was not created by this Agno runtime"
+            )
+        response = record.response
         if pause.envelope != record.envelope:
             raise ConfigurationError(
                 "pause authority envelope does not match the original run"
@@ -166,8 +175,7 @@ class AgnoRuntime:
                     envelope=record.envelope,
                     context=record.context,
                 )
-                if resumed is not response:
-                    self._pause_records.pop(record_key, None)
+                self._pause_records.pop(record_key, None)
                 return outcome
 
             self._pause_records.pop(record_key, None)

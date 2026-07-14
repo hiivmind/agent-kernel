@@ -41,16 +41,9 @@ class FakeRequirement:
         self.needs_confirmation = confirmation
         self.needs_external_execution = external_execution
         self.provided = []
-        self.tool_args = {"wheel": "classic"}
 
     def provide_user_input(self, answers):
         self.provided.append(answers)
-
-    def to_dict(self):
-        return {
-            "tool_args": dict(self.tool_args),
-            "fields": [field.name for field in self.user_input_schema],
-        }
 
 
 def paused_response(*requirements):
@@ -162,7 +155,11 @@ def test_pause_exposes_user_input_fields_and_preserves_original_state(
     outcome = runtime.execute("spin", plan, context=context)
 
     assert isinstance(outcome, Pause)
-    assert outcome.adapter_state is response
+    assert outcome.adapter_state is not response
+    assert not hasattr(outcome.adapter_state, "requirements")
+    assert not hasattr(outcome.adapter_state, "content")
+    with pytest.raises(AttributeError):
+        outcome.adapter_state.requirements = []
     assert outcome.envelope is plan.envelope
     assert outcome.runtime_context is context
     assert tuple(item["field"] for item in outcome.requirements) == (
@@ -173,6 +170,38 @@ def test_pause_exposes_user_input_fields_and_preserves_original_state(
         "Which die?",
         "Modifier?",
     )
+
+
+def test_resume_rejects_replaced_opaque_pause_token(plan):
+    response = paused_response(FakeRequirement([FakeField("sides")]))
+    factory = FakeAgentFactory(
+        response,
+        continue_responses=[completed_response()],
+    )
+    runtime = make_runtime(factory)
+    pause = runtime.execute("spin", plan)
+    forged = replace(pause, adapter_state=object())
+
+    with pytest.raises(ConfigurationError, match="pause"):
+        runtime.resume(forged, {"sides": "d20"})
+
+    assert factory.agents[0].continue_calls == []
+
+
+def test_public_requirement_snapshot_cannot_mutate_private_response(plan):
+    requirement = FakeRequirement([FakeField("sides")])
+    response = paused_response(requirement)
+    finished = completed_response()
+    runtime = make_runtime(
+        FakeAgentFactory(response, continue_responses=[finished])
+    )
+    pause = runtime.execute("spin", plan)
+    pause.requirements[0]["field"] = "delete_world"
+
+    outcome = runtime.resume(pause, {"sides": "d20"})
+
+    assert outcome == Completed(content="finished", raw=finished)
+    assert requirement.provided == [{"sides": "d20"}]
 
 
 def test_resume_uses_same_agent_and_restamps_original_authority(plan):
@@ -270,23 +299,6 @@ def test_resume_rejects_mutated_pause_status(plan):
     runtime = make_runtime(factory)
     pause = runtime.execute("spin", plan)
     response.is_paused = False
-
-    with pytest.raises(ConfigurationError, match="state"):
-        runtime.resume(pause, {"sides": "d20"})
-
-    assert factory.agents[0].continue_calls == []
-
-
-def test_resume_rejects_mutated_paused_tool_arguments(plan):
-    requirement = FakeRequirement([FakeField("sides")])
-    response = paused_response(requirement)
-    factory = FakeAgentFactory(
-        response,
-        continue_responses=[completed_response()],
-    )
-    runtime = make_runtime(factory)
-    pause = runtime.execute("spin", plan)
-    requirement.tool_args["wheel"] = "delete_world"
 
     with pytest.raises(ConfigurationError, match="state"):
         runtime.resume(pause, {"sides": "d20"})
@@ -399,7 +411,8 @@ def test_resume_can_pause_again_and_then_complete_on_same_agent(plan):
     second_pause = runtime.resume(first_pause, {"sides": "d20"})
 
     assert isinstance(second_pause, Pause)
-    assert second_pause.adapter_state is second_response
+    assert second_pause.adapter_state is not second_response
+    assert second_pause.adapter_state is not first_pause.adapter_state
     assert second_pause.envelope is plan.envelope
     assert second_pause.runtime_context is context
     assert tuple(

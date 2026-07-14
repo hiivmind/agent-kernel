@@ -75,9 +75,8 @@ def test_projected_signature_rejects_authority_field_colliding_with_reserved_fie
             authority_fields={field_name: frozenset({"safe", "fast"})},
         ),
     )
-    registry = _registry(specs=(CHAT, DENIED, conflicting_spin))
-
     with pytest.raises(ConfigurationError, match=field_name):
+        registry = _registry(specs=(CHAT, DENIED, conflicting_spin))
         build_signature(registry)
 
 
