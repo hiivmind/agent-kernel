@@ -137,10 +137,11 @@ async def collect_events(agent, message="spin"):
 
 @pytest.mark.asyncio
 async def test_stream_wraps_content_with_agentos_lifecycle_events():
+    kernel = RecordingKernel(Completed(content={"colour": "blue"}, raw=None))
     agent = KernelAgent(
         id="kernel-spinner",
         name="Kernel Spinner",
-        kernel=RecordingKernel(Completed(content={"colour": "blue"}, raw=None)),
+        kernel=kernel,
         principal=PRINCIPAL,
     )
 
@@ -153,6 +154,7 @@ async def test_stream_wraps_content_with_agentos_lifecycle_events():
     ]
     assert events[1].content == "{'colour': 'blue'}"
     assert events[2].content == "{'colour': 'blue'}"
+    assert len(kernel.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -164,10 +166,11 @@ async def test_stream_reconstructs_tool_events_before_final_content():
         result="blue",
     )
     raw = SimpleNamespace(tools=[tool])
+    kernel = RecordingKernel(Completed(content="The wheel chose blue.", raw=raw))
     agent = KernelAgent(
         id="kernel-spinner",
         name="Kernel Spinner",
-        kernel=RecordingKernel(Completed(content="The wheel chose blue.", raw=raw)),
+        kernel=kernel,
         principal=PRINCIPAL,
     )
 
@@ -185,14 +188,50 @@ async def test_stream_reconstructs_tool_events_before_final_content():
     assert events[2].tool.tool_call_id == "tool-7"
     assert events[2].tool.result == "blue"
     assert events[3].content == "The wheel chose blue."
+    assert len(kernel.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_without_session_id_uses_one_non_null_event_identity():
+    tool = ToolExecution(
+        tool_call_id="tool-7",
+        tool_name="spin_wheel",
+        tool_args={},
+        result="blue",
+    )
+    kernel = RecordingKernel(
+        Completed(content="The wheel chose blue.", raw=SimpleNamespace(tools=[tool]))
+    )
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=kernel,
+        principal=PRINCIPAL,
+    )
+
+    events = [
+        event
+        async for event in agent.arun(
+            "spin",
+            stream=True,
+            user_id="browser-user",
+        )
+    ]
+
+    assert len({event.run_id for event in events}) == 1
+    assert events[0].run_id is not None
+    assert len({event.session_id for event in events}) == 1
+    assert events[0].session_id is not None
+    assert len(kernel.calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_stream_turn_failure_emits_error_not_content():
+    kernel = RecordingKernel(Failed(stage="runtime", cause=RuntimeError("down")))
     agent = KernelAgent(
         id="kernel-spinner",
         name="Kernel Spinner",
-        kernel=RecordingKernel(Failed(stage="runtime", cause=RuntimeError("down"))),
+        kernel=kernel,
         principal=PRINCIPAL,
     )
 
@@ -200,3 +239,4 @@ async def test_stream_turn_failure_emits_error_not_content():
 
     assert [type(event) for event in events] == [RunStartedEvent, RunErrorEvent]
     assert "runtime: down" in str(events[-1].content)
+    assert len(kernel.calls) == 1

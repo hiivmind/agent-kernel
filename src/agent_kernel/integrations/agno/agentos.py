@@ -87,6 +87,16 @@ class KernelAgent(BaseExternalAgent):
             return ()
         return tuple(tool for tool in raw_tools if isinstance(tool, ToolExecution))
 
+    async def _arun_stream(
+        self,
+        input: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunOutputEvent]:
+        if not kwargs.get("session_id"):
+            kwargs["session_id"] = str(uuid4())
+        async for event in super()._arun_stream(input, **kwargs):
+            yield event
+
     async def _arun_adapter_stream(
         self,
         input: Any,
