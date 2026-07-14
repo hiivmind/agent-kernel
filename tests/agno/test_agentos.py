@@ -2,6 +2,15 @@ from types import SimpleNamespace
 
 import pytest
 from agno.agent.protocol import AgentProtocol
+from agno.models.response import ToolExecution
+from agno.run.agent import (
+    RunCompletedEvent,
+    RunContentEvent,
+    RunErrorEvent,
+    RunStartedEvent,
+    ToolCallCompletedEvent,
+    ToolCallStartedEvent,
+)
 from agno.run.base import RunStatus
 
 from agent_kernel import (
@@ -112,3 +121,82 @@ def test_kernel_and_principal_are_required():
             name="Missing",
             kernel=RecordingKernel(Completed(content="x", raw=SimpleNamespace())),
         )
+
+
+async def collect_events(agent, message="spin"):
+    return [
+        event
+        async for event in agent.arun(
+            message,
+            stream=True,
+            user_id="browser-user",
+            session_id="session-7",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_wraps_content_with_agentos_lifecycle_events():
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=RecordingKernel(Completed(content={"colour": "blue"}, raw=None)),
+        principal=PRINCIPAL,
+    )
+
+    events = await collect_events(agent)
+
+    assert [type(event) for event in events] == [
+        RunStartedEvent,
+        RunContentEvent,
+        RunCompletedEvent,
+    ]
+    assert events[1].content == "{'colour': 'blue'}"
+    assert events[2].content == "{'colour': 'blue'}"
+
+
+@pytest.mark.asyncio
+async def test_stream_reconstructs_tool_events_before_final_content():
+    tool = ToolExecution(
+        tool_call_id="tool-7",
+        tool_name="spin_wheel",
+        tool_args={},
+        result="blue",
+    )
+    raw = SimpleNamespace(tools=[tool])
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=RecordingKernel(Completed(content="The wheel chose blue.", raw=raw)),
+        principal=PRINCIPAL,
+    )
+
+    events = await collect_events(agent)
+
+    assert [type(event) for event in events] == [
+        RunStartedEvent,
+        ToolCallStartedEvent,
+        ToolCallCompletedEvent,
+        RunContentEvent,
+        RunCompletedEvent,
+    ]
+    assert events[1].tool.tool_name == "spin_wheel"
+    assert events[1].tool.result is None
+    assert events[2].tool.tool_call_id == "tool-7"
+    assert events[2].tool.result == "blue"
+    assert events[3].content == "The wheel chose blue."
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_failure_emits_error_not_content():
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=RecordingKernel(Failed(stage="runtime", cause=RuntimeError("down"))),
+        principal=PRINCIPAL,
+    )
+
+    events = await collect_events(agent)
+
+    assert [type(event) for event in events] == [RunStartedEvent, RunErrorEvent]
+    assert "runtime: down" in str(events[-1].content)

@@ -1,8 +1,17 @@
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from agno.agents.base import BaseExternalAgent
+from agno.models.response import ToolExecution
+from agno.run.agent import (
+    RunContentEvent,
+    RunOutputEvent,
+    ToolCallCompletedEvent,
+    ToolCallStartedEvent,
+)
 
 from agent_kernel.core.kernel import Kernel
 from agent_kernel.core.results import Completed, Failed, Pause, Principal, TurnResult
@@ -70,3 +79,55 @@ class KernelAgent(BaseExternalAgent):
             session_id=kwargs.get("session_id"),
         )
         return str(completed.content)
+
+    @staticmethod
+    def _tools(completed: Completed) -> tuple[ToolExecution, ...]:
+        raw_tools = getattr(completed.raw, "tools", None)
+        if not isinstance(raw_tools, (list, tuple)):
+            return ()
+        return tuple(tool for tool in raw_tools if isinstance(tool, ToolExecution))
+
+    async def _arun_adapter_stream(
+        self,
+        input: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunOutputEvent]:
+        completed = await self._execute_kernel(
+            input,
+            user_id=kwargs.get("user_id"),
+            session_id=kwargs.get("session_id"),
+        )
+        run_id = kwargs.get("run_id")
+        session_id = kwargs.get("session_id")
+        for recorded in self._tools(completed):
+            tool_call_id = recorded.tool_call_id or str(uuid4())
+            yield ToolCallStartedEvent(
+                run_id=run_id,
+                session_id=session_id,
+                agent_id=self.get_id(),
+                agent_name=self.name or "",
+                tool=ToolExecution(
+                    tool_call_id=tool_call_id,
+                    tool_name=recorded.tool_name,
+                    tool_args=recorded.tool_args,
+                ),
+            )
+            yield ToolCallCompletedEvent(
+                run_id=run_id,
+                session_id=session_id,
+                agent_id=self.get_id(),
+                agent_name=self.name or "",
+                tool=ToolExecution(
+                    tool_call_id=tool_call_id,
+                    tool_name=recorded.tool_name,
+                    tool_args=recorded.tool_args,
+                    result=recorded.result,
+                ),
+            )
+        yield RunContentEvent(
+            run_id=run_id,
+            session_id=session_id,
+            agent_id=self.get_id(),
+            agent_name=self.name or "",
+            content=str(completed.content),
+        )
