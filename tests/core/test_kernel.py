@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError
 from typing import Literal
 
 import pytest
+from pydantic import field_validator
 
 from agent_kernel.core.continuation import Continuation
 from agent_kernel.core.errors import ConfigurationError
@@ -175,6 +176,64 @@ def test_run_falls_to_toolfree_default_for_invalid_required_authority_literal(
         default="chat",
         denied="denied",
         intent_type=RequiredModeIntent,
+    )
+    runtime = FakeRuntime()
+    kernel = Kernel(
+        KernelConfig(registry),
+        FakeClassifier(
+            {
+                "action": "spin",
+                "confidence": 1.0,
+                "brief": "spin",
+                "mode": "root",
+            }
+        ),
+        runtime,
+    )
+
+    result = kernel.run("spin", principal=member)
+
+    assert result.plan.action == "chat"
+    assert result.plan.capabilities == frozenset()
+    assert runtime.execute_calls == [("spin", result.plan, None)]
+
+
+def test_run_uses_fully_valid_later_authority_value_for_safe_fallback(member):
+    class ValidatedModeIntent(Intent):
+        mode: Literal["fast", "safe"]
+
+        @field_validator("mode")
+        @classmethod
+        def reject_fast(cls, value):
+            if value == "fast":
+                raise ValueError("fast is unavailable")
+            return value
+
+    def build_chat(intent, context):
+        return Briefing(instructions=("reply safely",))
+
+    registry = Registry(
+        (
+            ActionSpec(name="chat", kind="toolfree", build=build_chat),
+            ActionSpec(name="denied", kind="toolfree", build=build_chat),
+            ActionSpec(
+                name="spin",
+                kind="privileged",
+                build=lambda intent, context: Briefing(
+                    instructions=("spin",),
+                    grants=frozenset({"spin_wheel"}),
+                ),
+                capabilities=frozenset({"spin_wheel"}),
+                continuation=ContinuationSpec(
+                    authority_fields={
+                        "mode": frozenset({"fast", "safe"})
+                    }
+                ),
+            ),
+        ),
+        default="chat",
+        denied="denied",
+        intent_type=ValidatedModeIntent,
     )
     runtime = FakeRuntime()
     kernel = Kernel(

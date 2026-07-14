@@ -1,5 +1,7 @@
-import pytest
 from typing import Literal
+
+import pytest
+from pydantic import model_validator
 
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
@@ -93,4 +95,35 @@ def test_registry_rejects_unconstructible_authority_vocabulary(
             default="chat",
             denied="chat",
             intent_type=ModeIntent,
+        )
+
+
+def test_registry_rejects_when_no_authority_combination_builds_safe_default():
+    class ActionDependentIntent(Intent):
+        mode: Literal["safe", "fast"]
+
+        @model_validator(mode="after")
+        def reject_default_action(self):
+            if self.action == "chat":
+                raise ValueError("chat has no valid mode")
+            return self
+
+    chat = ActionSpec(name="chat", kind="toolfree", build=build_chat)
+    spin = ActionSpec(
+        name="spin",
+        kind="privileged",
+        build=build_chat,
+        continuation=ContinuationSpec(
+            authority_fields={
+                "mode": frozenset({"safe", "fast"})
+            }
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="fallback"):
+        Registry(
+            (chat, spin),
+            default="chat",
+            denied="chat",
+            intent_type=ActionDependentIntent,
         )

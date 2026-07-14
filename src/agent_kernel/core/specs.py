@@ -1,14 +1,18 @@
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
+from itertools import product
 from types import MappingProxyType
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ValidationError
 from agent_kernel.core._validation import capability_set, string_tuple
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
 
 I = TypeVar("I", bound=Intent)  # noqa: E741
+
+_MAX_FALLBACK_CANDIDATES = 4096
 
 
 @dataclass(frozen=True)
@@ -116,26 +120,55 @@ class Registry(Generic[I]):
         for spec in self._specs.values():
             if spec.continuation is None:
                 continue
-            for field_name, values in spec.continuation.authority_fields.items():
+            for field_name, declared_values in (
+                spec.continuation.authority_fields.items()
+            ):
                 model_field = intent_type.model_fields.get(field_name)
-                if model_field is None or not values:
+                if (
+                    field_name in {"action", "confidence", "brief"}
+                    or model_field is None
+                    or not declared_values
+                ):
                     raise ConfigurationError(
                         f"invalid authority vocabulary for field {field_name!r}"
                     )
-                adapter: TypeAdapter[Any] = TypeAdapter(model_field.annotation)
-                try:
-                    for value in values:
-                        adapter.validate_python(value)
-                except ValidationError as exc:
-                    raise ConfigurationError(
-                        f"invalid authority vocabulary for field {field_name!r}"
-                    ) from exc
-                authority_values.setdefault(field_name, set()).update(values)
-        self._authority_defaults = MappingProxyType(
-            {
-                field_name: sorted(values)[0]
-                for field_name, values in authority_values.items()
+                authority_values.setdefault(field_name, set()).update(
+                    declared_values
+                )
+        authority_fields = tuple(sorted(authority_values))
+        authority_options = tuple(
+            tuple(sorted(authority_values[field_name]))
+            for field_name in authority_fields
+        )
+        candidate_count = 1
+        for options in authority_options:
+            candidate_count *= len(options)
+        if candidate_count > _MAX_FALLBACK_CANDIDATES:
+            raise ConfigurationError(
+                "authority vocabularies produce too many fallback candidates"
+            )
+
+        validated_fallback: I | None = None
+        for candidate_values in product(*authority_options):
+            candidate: dict[str, object] = {
+                "action": default,
+                "confidence": 0.0,
+                "brief": "",
             }
+            candidate.update(
+                zip(authority_fields, candidate_values, strict=True)
+            )
+            try:
+                validated_fallback = intent_type.model_validate(candidate)
+            except ValidationError:
+                continue
+            break
+        if validated_fallback is None:
+            raise ConfigurationError(
+                "authority vocabularies cannot construct a valid fallback intent"
+            )
+        self._fallback_payload = MappingProxyType(
+            deepcopy(validated_fallback.model_dump(mode="python"))
         )
         self.default = default
         self.denied = denied
@@ -159,10 +192,7 @@ class Registry(Generic[I]):
         except ValidationError as exc:
             if not isinstance(serialized, dict):
                 raise ConfigurationError("invalid intent") from exc
-            fallback = dict(serialized)
-            fallback["action"] = self.default
-            fallback["confidence"] = 0.0
-            fallback.update(self._authority_defaults)
+            fallback = deepcopy(dict(self._fallback_payload))
             try:
                 return self.intent_type.model_validate(fallback), False
             except ValidationError as fallback_exc:
