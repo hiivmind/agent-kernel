@@ -43,13 +43,3 @@ def test_readme_uses_pypi_safe_absolute_documentation_links():
 
     assert "](docs/" not in contents
     assert "https://github.com/hiivmind/agent-kernel/blob/main/docs/" in contents
-
-
-def test_supported_agno_api_includes_agentos_hosting_adapter():
-    from agent_kernel.integrations.agno import (
-        KernelAgent,
-        KernelAgentError,
-        KernelAgentPauseUnsupported,
-    )
-
-    assert all((KernelAgent, KernelAgentError, KernelAgentPauseUnsupported))

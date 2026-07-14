@@ -76,6 +76,10 @@ if __name__ == "__main__":
 `KernelAgent` is a hosting adapter: it gives AgentOS access to the configured
 kernel without adding a wrapper LLM. The kernel's inner `AgnoRuntime` still
 enforces its authorized execution plan, using the application-supplied
-`Principal`. Streaming is reconstructed after the kernel finishes rather than
-emitted token by token. Native HITL continuation and background or resumable
-AgentOS runs are not yet supported.
+`Principal`. Each AgentOS run invokes that configured kernel exactly once.
+
+Streaming is reconstructed only after the kernel completes rather than emitted
+token by token. Within AgentOS's base started/completed lifecycle events, the
+adapter emits each recorded tool-start/tool-completed pair in its original
+order, followed by exactly one final content event. Native HITL continuation
+and background or resumable AgentOS runs are not yet supported.
