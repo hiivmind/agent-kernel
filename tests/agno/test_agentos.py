@@ -20,6 +20,7 @@ from agent_kernel import (
     Failed,
     Pause,
     Principal,
+    PrincipalResolver,
     Role,
     TurnResult,
 )
@@ -51,6 +52,20 @@ class RecordingKernel:
     def run(self, message, *, principal, context=None, runtime_context=None):
         self.calls.append((message, principal, context, runtime_context))
         return TurnResult(plan=PLAN, outcome=self.outcome)
+
+
+class RecordingResolver:
+    def __init__(self, principal):
+        self.principal = principal
+        self.calls = []
+
+    def resolve(self, runtime_context):
+        self.calls.append(runtime_context)
+        return self.principal
+
+
+def accepts_principal_resolver(resolver: PrincipalResolver) -> None:
+    pass
 
 
 @pytest.mark.asyncio
@@ -134,15 +149,45 @@ async def test_failed_and_paused_outcomes_are_agentos_error_runs(outcome, messag
     assert message in str(output.content)
 
 
-def test_kernel_and_principal_are_required():
+def test_kernel_and_exactly_one_principal_source_are_required():
     with pytest.raises(ValueError, match="kernel is required"):
         KernelAgent(id="missing-kernel", name="Missing", principal=PRINCIPAL)
-    with pytest.raises(ValueError, match="principal is required"):
+    with pytest.raises(ValueError, match="exactly one"):
         KernelAgent(
             id="missing-principal",
             name="Missing",
             kernel=RecordingKernel(Completed(content="x", raw=SimpleNamespace())),
         )
+    with pytest.raises(ValueError, match="exactly one"):
+        KernelAgent(
+            id="both-principal-sources",
+            name="Both",
+            kernel=RecordingKernel(Completed(content="x", raw=SimpleNamespace())),
+            principal=PRINCIPAL,
+            principal_resolver=RecordingResolver(PRINCIPAL),
+        )
+
+
+@pytest.mark.asyncio
+async def test_kernel_agent_resolves_principal_on_every_run():
+    kernel = RecordingKernel(Completed(content="hello", raw=None))
+    resolver = RecordingResolver(PRINCIPAL)
+    accepts_principal_resolver(resolver)
+    agent = KernelAgent(
+        id="kernel-spinner",
+        name="Kernel Spinner",
+        kernel=kernel,
+        principal_resolver=resolver,
+    )
+
+    await agent.arun("first", stream=False, user_id="alice", session_id="session-1")
+    await agent.arun("second", stream=False, user_id="bob", session_id="session-2")
+
+    assert resolver.calls == [
+        AgnoRunContext(user_id="alice", session_id="session-1"),
+        AgnoRunContext(user_id="bob", session_id="session-2"),
+    ]
+    assert [call[1] for call in kernel.calls] == [PRINCIPAL, PRINCIPAL]
 
 
 async def collect_events(agent, message="spin"):

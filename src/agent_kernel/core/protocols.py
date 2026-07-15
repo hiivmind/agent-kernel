@@ -5,6 +5,7 @@ from agent_kernel.core.intents import Intent
 from agent_kernel.core.results import (
     ExecutionPlan,
     Pause,
+    Principal,
     RuntimeOutcome,
 )
 
@@ -18,6 +19,10 @@ class Classifier(Protocol[I_co]):
         *,
         context: Continuation | None = None,
     ) -> I_co: ...
+
+
+class PrincipalResolver(Protocol):
+    def resolve(self, runtime_context: object) -> Principal: ...
 
 
 class Runtime(Protocol):

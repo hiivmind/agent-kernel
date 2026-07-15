@@ -15,6 +15,7 @@ from agno.run.agent import (
 )
 
 from agent_kernel.core.kernel import Kernel
+from agent_kernel.core.protocols import PrincipalResolver
 from agent_kernel.core.results import Completed, Failed, Pause, Principal, TurnResult
 from agent_kernel.integrations.agno.context import AgnoRunContext
 
@@ -31,14 +32,15 @@ class KernelAgentPauseUnsupported(KernelAgentError):
 class KernelAgent(BaseExternalAgent):
     kernel: Kernel[Any] | None = None
     principal: Principal | None = None
+    principal_resolver: PrincipalResolver | None = None
     framework: str = "agent-kernel"
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.kernel is None:
             raise ValueError("kernel is required")
-        if self.principal is None:
-            raise ValueError("principal is required")
+        if (self.principal is None) == (self.principal_resolver is None):
+            raise ValueError("exactly one of principal or principal_resolver is required")
 
     @staticmethod
     def _completed(result: TurnResult) -> Completed:
@@ -61,15 +63,19 @@ class KernelAgent(BaseExternalAgent):
         session_id: str | None,
     ) -> Completed:
         assert self.kernel is not None
-        assert self.principal is not None
+        runtime_context = AgnoRunContext(
+            user_id=user_id,
+            session_id=session_id,
+        )
+        principal = self.principal
+        if self.principal_resolver is not None:
+            principal = self.principal_resolver.resolve(runtime_context)
+        assert principal is not None
         result = await asyncio.to_thread(
             self.kernel.run,
             str(input),
-            principal=self.principal,
-            runtime_context=AgnoRunContext(
-                user_id=user_id,
-                session_id=session_id,
-            ),
+            principal=principal,
+            runtime_context=runtime_context,
         )
         return self._completed(result)
 
