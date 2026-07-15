@@ -5,6 +5,7 @@ from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
 from agent_kernel.core.results import (
     AuthorityEnvelope,
+    AuthorityScope,
     ExecutionPlan,
     Principal,
 )
@@ -37,7 +38,13 @@ class Planner(Generic[I]):
                 f"toolfree action {spec.name!r} built grants: {sorted(briefing.grants)}"
             )
 
-    def plan(self, intent: I, principal: Principal) -> ExecutionPlan:
+    def plan(
+        self,
+        intent: I,
+        principal: Principal,
+        *,
+        authority_scope: AuthorityScope | None = None,
+    ) -> ExecutionPlan:
         intent, valid = self.registry.normalize_intent(intent)
         spec = self.registry.get(intent.action)
         reason = None if valid else "invalid intent"
@@ -97,6 +104,6 @@ class Planner(Generic[I]):
                 else spec.tool_call_limit
             ),
             reads_history=spec.reads_history,
-            envelope=AuthorityEnvelope(principal.id, briefing.grants),
+            envelope=AuthorityEnvelope(principal.id, briefing.grants, authority_scope),
             reason=reason,
         )

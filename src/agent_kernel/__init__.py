@@ -6,11 +6,13 @@ from agent_kernel.core.kernel import Kernel, KernelConfig
 from agent_kernel.core.protocols import Classifier, Runtime
 from agent_kernel.core.results import (
     AuthorityEnvelope,
+    AuthorityScope,
     Completed,
     ExecutionPlan,
     Failed,
     Pause,
     Principal,
+    ResourceAuthority,
     Role,
     RuntimeOutcome,
     TurnResult,
@@ -30,6 +32,7 @@ __version__ = "0.1.0"
 __all__ = [
     "ActionSpec",
     "AuthorityEnvelope",
+    "AuthorityScope",
     "Briefing",
     "BuildContext",
     "CatalogEntry",
@@ -48,6 +51,7 @@ __all__ = [
     "Planner",
     "Principal",
     "Registry",
+    "ResourceAuthority",
     "Role",
     "Runtime",
     "RuntimeOutcome",

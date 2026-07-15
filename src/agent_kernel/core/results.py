@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TypeAlias
 
 from agent_kernel.core._validation import capability_set, string_tuple
@@ -25,9 +26,53 @@ class Principal:
 
 
 @dataclass(frozen=True)
+class ResourceAuthority:
+    kind: str
+    reference: str
+    verbs: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if not self.kind or not self.reference:
+            raise ConfigurationError("resource kind and reference are required")
+        object.__setattr__(
+            self,
+            "verbs",
+            capability_set(self.verbs, field="resource authority verbs"),
+        )
+
+
+@dataclass(frozen=True)
+class AuthorityScope:
+    target_kind: str
+    target_id: str
+    subject: str
+    resources: tuple[ResourceAuthority, ...]
+    policy_version: str
+    correlation_id: str
+    issued_at: datetime
+    expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not all(
+            (
+                self.target_kind,
+                self.target_id,
+                self.subject,
+                self.policy_version,
+                self.correlation_id,
+            )
+        ):
+            raise ConfigurationError("authority scope identifiers are required")
+        object.__setattr__(self, "resources", tuple(self.resources))
+        if self.expires_at is not None and self.expires_at <= self.issued_at:
+            raise ConfigurationError("expires_at must be after issued_at")
+
+
+@dataclass(frozen=True)
 class AuthorityEnvelope:
     principal_id: str
     allowed: frozenset[str]
+    scope: AuthorityScope | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(

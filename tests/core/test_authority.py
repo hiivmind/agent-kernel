@@ -1,12 +1,59 @@
 # ruff: noqa: F811
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
+from agent_kernel import AuthorityScope, ResourceAuthority
 from agent_kernel.core.authority import Planner
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.results import AuthorityEnvelope, Principal, Role
 from agent_kernel.core.specs import ActionSpec, Briefing, Registry
 from example_registry import ExampleIntent, example, guest, member  # noqa: F401
+
+
+def test_authorized_plan_seals_exact_target_subject_and_resources(example, member):
+    now = datetime(2026, 7, 15, tzinfo=UTC)
+    scope = AuthorityScope(
+        target_kind="skill",
+        target_id="hiivmind-corpus-status",
+        subject="agno",
+        resources=(
+            ResourceAuthority(
+                kind="workspace",
+                reference="corpus-agno",
+                verbs=frozenset({"read"}),
+            ),
+        ),
+        policy_version="corpus-ops-v2",
+        correlation_id="session:s1",
+        issued_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    plan = example.planner.plan(
+        example.intent_type(action="spin", confidence=1, brief="spin"),
+        member,
+        authority_scope=scope,
+    )
+
+    assert plan.envelope.scope == scope
+    assert plan.envelope.allowed == plan.capabilities
+
+
+def test_authority_scope_rejects_expiry_not_after_issue_time():
+    now = datetime(2026, 7, 15, tzinfo=UTC)
+    with pytest.raises(ConfigurationError, match="expires_at must be after issued_at"):
+        AuthorityScope(
+            target_kind="skill",
+            target_id="status",
+            subject="agno",
+            resources=(),
+            policy_version="v1",
+            correlation_id="run:1",
+            issued_at=now,
+            expires_at=now,
+        )
 
 
 def test_authorized_plan_grants_declared_capability(example, member):
