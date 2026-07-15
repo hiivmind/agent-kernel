@@ -14,6 +14,19 @@ python -m pip install agent-kernel
 The core package has no agent-framework dependency. See the complete
 network-free example below and the focused guides for Agno and DSPy usage.
 
+## Identity boundary
+
+A `Principal` supplied directly to a hosted adapter is a fixed, local-only
+identity. Use that form for local development, tests, and other deployments
+where the caller is already trusted; do not use it to represent a remote
+AgentOS user.
+
+For authenticated AgentOS requests, use `AgentOSPrincipalResolver` with
+`AgentOSTrustedStateMiddleware` to derive a principal at request time from
+AgentOS-verified ASGI state. The application owns the policy that maps verified
+roles, scopes, and claims to kernel capabilities. `agent-kernel` deliberately
+does not map application roles to capabilities.
+
 ```python
 from agent_kernel import (
     ActionSpec, Briefing, BuildContext, Completed, Continuation, ExecutionPlan,
