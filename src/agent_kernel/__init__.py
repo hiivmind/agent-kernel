@@ -3,6 +3,14 @@ from agent_kernel.core.continuation import Continuation
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
 from agent_kernel.core.kernel import Kernel, KernelConfig
+from agent_kernel.core.operations import (
+    OperationCompletion,
+    OperationContract,
+    OperationInvocation,
+    OperationRuntime,
+    SubjectContext,
+    ValueAdapter,
+)
 from agent_kernel.core.protocols import Classifier, Runtime
 from agent_kernel.core.results import (
     AuthorityEnvelope,
@@ -44,6 +52,10 @@ __all__ = [
     "Intent",
     "Kernel",
     "KernelConfig",
+    "OperationCompletion",
+    "OperationContract",
+    "OperationInvocation",
+    "OperationRuntime",
     "Pause",
     "Planner",
     "Principal",
@@ -51,6 +63,8 @@ __all__ = [
     "Role",
     "Runtime",
     "RuntimeOutcome",
+    "SubjectContext",
     "TurnResult",
+    "ValueAdapter",
     "__version__",
 ]

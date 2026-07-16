@@ -8,11 +8,17 @@ def test_supported_core_api_is_top_level():
         Intent,
         Kernel,
         KernelConfig,
+        OperationCompletion,
+        OperationContract,
+        OperationInvocation,
+        OperationRuntime,
         Pause,
         Principal,
         Registry,
         Role,
+        SubjectContext,
         TurnResult,
+        ValueAdapter,
     )
 
     assert all(
@@ -25,11 +31,17 @@ def test_supported_core_api_is_top_level():
             Intent,
             Kernel,
             KernelConfig,
+            OperationCompletion,
+            OperationContract,
+            OperationInvocation,
+            OperationRuntime,
             Pause,
             Principal,
             Registry,
             Role,
+            SubjectContext,
             TurnResult,
+            ValueAdapter,
         )
     )
 
