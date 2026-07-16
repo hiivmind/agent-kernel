@@ -46,6 +46,32 @@ def test_supported_core_api_is_top_level():
     )
 
 
+def test_supported_agno_operation_api_is_exported():
+    from agent_kernel.integrations.agno import (
+        AgnoBindingProvider,
+        AgnoCapabilityBinding,
+        AgnoInvocationContext,
+        AgnoSkillProvider,
+        AgnoSkillRuntime,
+        AgnoSkillSource,
+        SafeSkills,
+        capability_hook,
+    )
+
+    assert all(
+        (
+            AgnoBindingProvider,
+            AgnoCapabilityBinding,
+            AgnoInvocationContext,
+            AgnoSkillProvider,
+            AgnoSkillRuntime,
+            AgnoSkillSource,
+            SafeSkills,
+            capability_hook,
+        )
+    )
+
+
 def test_readme_uses_pypi_safe_absolute_documentation_links():
     from pathlib import Path
 

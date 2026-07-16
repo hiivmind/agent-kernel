@@ -90,4 +90,5 @@ print(turn.plan.action, turn.plan.capabilities, turn.outcome)
 
 - [Core quickstart](https://github.com/hiivmind/agent-kernel/blob/main/docs/core-quickstart.md)
 - [Agno quickstart](https://github.com/hiivmind/agent-kernel/blob/main/docs/agno-quickstart.md)
+- [Agno upstream issue reports](https://github.com/hiivmind/agent-kernel/blob/main/docs/agno-upstream-issues.md)
 - [DSPy classifiers and artifacts](https://github.com/hiivmind/agent-kernel/blob/main/docs/dspy.md)
