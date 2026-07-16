@@ -33,6 +33,19 @@ class AgnoBindingProvider(Protocol):
         raise NotImplementedError
 
 
+def function_capability_map(
+    bindings: Mapping[str, AgnoCapabilityBinding],
+) -> dict[str, str]:
+    function_capabilities: dict[str, str] = {}
+    for selected_capability in sorted(bindings):
+        binding = bindings[selected_capability]
+        for function_name in sorted(binding.function_names):
+            if function_name in function_capabilities:
+                raise ValueError(f"duplicate function name: {function_name}")
+            function_capabilities[function_name] = binding.capability
+    return function_capabilities
+
+
 def capability_hook(
     function_capabilities: Mapping[str, str],
     *,

@@ -6,6 +6,7 @@ from agent_kernel.core.results import AuthorityEnvelope
 from agent_kernel.integrations.agno.bindings import (
     AgnoCapabilityBinding,
     capability_hook,
+    function_capability_map,
 )
 
 
@@ -35,12 +36,29 @@ def test_capability_binding_can_declare_multiple_tool_functions():
     assert binding.function_names == frozenset({"read_file", "fetch_url"})
 
 
-def test_capability_binding_rejects_empty_function_name():
+@pytest.mark.parametrize("function_name", ["", " ", "\t\n"])
+def test_capability_binding_rejects_empty_function_name(function_name):
     with pytest.raises(ValueError, match="function names must be non-empty"):
         AgnoCapabilityBinding(
             "resources:read:corpus-agno",
-            function_names=frozenset({""}),
+            function_names=frozenset({function_name}),
         )
+
+
+def test_function_capability_map_rejects_duplicate_name_across_bindings():
+    bindings = {
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            function_names=frozenset({"read_file"}),
+        ),
+        "resources:read:corpus-dspy": AgnoCapabilityBinding(
+            "resources:read:corpus-dspy",
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    with pytest.raises(ValueError, match="duplicate function name: read_file"):
+        function_capability_map(bindings)
 
 
 def test_capability_hook_maps_function_to_declared_capability():
@@ -88,18 +106,22 @@ def test_capability_hook_allows_explicit_safe_internal_reader(function_name):
 )
 def test_capability_hook_rejects_declared_function_without_authority(run_context):
     hook = capability_hook({"read_file": "resources:read:corpus-agno"})
+    calls = []
 
     with pytest.raises(PermissionError, match="principal may not call read_file"):
         hook(
             function_name="read_file",
             run_context=run_context,
             args={},
-            function_call=lambda: None,
+            function_call=lambda: calls.append("called"),
         )
+
+    assert calls == []
 
 
 def test_capability_hook_rejects_authority_for_different_capability():
     hook = capability_hook({"read_file": "resources:read:corpus-agno"})
+    calls = []
     context = SimpleNamespace(
         dependencies={
             "agent_kernel_authority": AuthorityEnvelope(
@@ -113,22 +135,34 @@ def test_capability_hook_rejects_authority_for_different_capability():
             function_name="read_file",
             run_context=context,
             args={},
-            function_call=lambda: None,
+            function_call=lambda: calls.append("called"),
         )
+
+    assert calls == []
 
 
 def test_capability_hook_rejects_undeclared_non_internal_function():
     hook = capability_hook({})
+    calls = []
 
     with pytest.raises(PermissionError, match="principal may not call delete_world"):
         hook(
             function_name="delete_world",
             run_context=SimpleNamespace(),
             args={},
-            function_call=lambda: None,
+            function_call=lambda: calls.append("called"),
         )
 
+    assert calls == []
 
-def test_capability_hook_rejects_empty_declared_function_name():
+
+@pytest.mark.parametrize("function_name", ["", " ", "\t\n"])
+def test_capability_hook_rejects_empty_declared_function_name(function_name):
     with pytest.raises(ValueError, match="function names must be non-empty"):
-        capability_hook({"": "resources:read:corpus-agno"})
+        capability_hook({function_name: "resources:read:corpus-agno"})
+
+
+@pytest.mark.parametrize("function_name", ["", " ", "\t\n"])
+def test_capability_hook_rejects_empty_internal_function_name(function_name):
+    with pytest.raises(ValueError, match="function names must be non-empty"):
+        capability_hook({}, internal_functions=frozenset({function_name}))
