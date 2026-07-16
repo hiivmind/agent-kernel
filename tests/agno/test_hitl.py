@@ -76,6 +76,18 @@ def completed_response(content="finished"):
     )
 
 
+class BrokenPauseResponse:
+    content = None
+    is_paused = True
+
+    def __init__(self, error):
+        self.error = error
+
+    @property
+    def active_requirements(self):
+        raise self.error
+
+
 class FakeAgent:
     def __init__(
         self,
@@ -364,6 +376,17 @@ def test_resume_returns_typed_failure_for_unsupported_requirement(
     assert factory.agents[0].continue_calls == []
 
 
+def test_legacy_pause_translation_failure_remains_runtime_stage(plan):
+    error = RuntimeError("pause state unavailable")
+    runtime = make_runtime(FakeAgentFactory(BrokenPauseResponse(error)))
+
+    outcome = runtime.execute("spin", plan)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "runtime"
+    assert outcome.cause is error
+
+
 def test_resume_returns_typed_failure_when_declared_answer_is_missing(
     plan,
 ):
@@ -639,3 +662,61 @@ def test_skill_resume_rejects_pause_token_from_another_runtime(tmp_path):
 
     assert first_case.factory.agents[0].continue_calls == []
     assert second_case.factory.agents[0].continue_calls == []
+
+
+def test_skill_pause_translation_failure_is_hitl_persistence(tmp_path):
+    error = RuntimeError("pause state unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        BrokenPauseResponse(error),
+        [],
+    )
+
+    outcome = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "hitl-persistence"
+    assert outcome.cause is error
+
+
+def test_skill_second_pause_translation_failure_is_hitl_persistence(tmp_path):
+    error = RuntimeError("second pause state unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [BrokenPauseResponse(error)],
+    )
+    pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+
+    outcome = case.runtime.resume(pause, {"scope": "workspace"})
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "hitl-persistence"
+    assert outcome.cause is error
+
+
+def test_skill_continuation_failure_is_hitl_resumption(tmp_path):
+    error = RuntimeError("continuation unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
+    )
+    pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+    case.factory.agents[0].continue_error = error
+
+    outcome = case.runtime.resume(pause, {"scope": "workspace"})
+
+    assert outcome == Failed(stage="hitl-resumption", cause=error)

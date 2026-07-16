@@ -168,3 +168,12 @@ tool and capability binding.
 
 See [Agno upstream issue reports](agno-upstream-issues.md) for the two
 non-blocking compatibility gaps behind that design.
+
+## Human-in-the-loop state
+
+Agno pause tokens are opaque and process-local. The runtime retains the
+corresponding Agent, authority, invocation state, and requirement snapshot in
+memory until that pause is resumed; a second pause replaces the first token
+with a new retained record. Tokens do not survive a process restart and are
+not a durable workflow store. Explicit cleanup and expiry for pauses that are
+never resumed remains a lifecycle follow-up.

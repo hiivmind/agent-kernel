@@ -1,9 +1,12 @@
 from dataclasses import replace
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agno.run.base import RunStatus
+from agno.run.base import RunContext, RunStatus
+from agno.models.response import ToolExecution
+from agno.tools.function import Function, FunctionCall
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from agent_kernel.core.errors import ConfigurationError
@@ -397,6 +400,93 @@ def test_duplicate_function_binding_is_configuration_failure(runtime_case):
     assert runtime_case.factory.calls == []
 
 
+def test_reserved_reader_binding_is_configuration_failure_before_agent(
+    runtime_case,
+):
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            function_names=frozenset({"get_skill_instructions"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "collide with internal functions" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+@pytest.mark.parametrize(
+    "malicious_builder",
+    [
+        lambda item: {"value": item},
+        lambda item: {"value": item.plan},
+        lambda item: {"value": item.plan.envelope},
+        lambda item: {"correlation": item.invocation_id},
+        lambda item: {"value": next(iter(item.plan.capabilities))},
+        lambda item: {"value": item.plan.envelope.principal_id},
+        lambda item: {"path": "/private/tmp/operator-secrets.json"},
+        lambda item: {item.plan.envelope.principal_id: "trusted-key"},
+        lambda item: {"/private/tmp/operator-secrets.json": "host-path-key"},
+        lambda item: {"api_key": "not-a-real-key"},
+        lambda item: {"value": object()},
+        lambda item: {"value": {1: "not-a-string-key"}},
+        lambda item: {"value": math.nan},
+    ],
+    ids=[
+        "invocation-object",
+        "plan-object",
+        "authority-envelope",
+        "invocation-id",
+        "capability-string",
+        "principal-string",
+        "absolute-path",
+        "principal-key",
+        "absolute-path-key",
+        "credential-key",
+        "runtime-object",
+        "non-string-key",
+        "non-json-float",
+    ],
+)
+def test_model_input_builder_cannot_leak_trusted_state(
+    runtime_case,
+    malicious_builder,
+):
+    contract = replace(
+        runtime_case.contract,
+        model_input_builder=malicious_builder,
+    )
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "input-validation"
+    assert runtime_case.factory.calls == []
+
+
+def test_model_input_builder_cannot_leak_invocation_handle(runtime_case):
+    contract = replace(
+        runtime_case.contract,
+        model_input_builder=lambda item: {
+            "request": item.request,
+            "handle": runtime_case.handle,
+        },
+    )
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "input-validation"
+    assert runtime_case.factory.calls == []
+
+
 def test_provider_exception_is_provider_execution_failure(runtime_case):
     provider_error = RuntimeError("provider unavailable")
     runtime_case.factory.error = provider_error
@@ -417,6 +507,61 @@ def test_agno_marked_tool_error_is_tool_execution_failure(runtime_case):
     outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
 
     assert outcome == Failed(stage="tool-execution", cause=tool_error)
+
+
+def test_real_agno_tool_execution_recovers_original_governed_exception(
+    runtime_case,
+):
+    tool_error = PermissionError("governed tool rejected")
+
+    class ToolFailureAgent:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+
+        def run(self, message, **kwargs):
+            del message
+
+            def fail() -> None:
+                raise tool_error
+
+            function = Function(
+                name="read_file",
+                entrypoint=fail,
+                tool_hooks=self.kwargs["tool_hooks"],
+            )
+            function._run_context = RunContext(
+                run_id="run-17",
+                session_id="session-3",
+                dependencies=kwargs["dependencies"],
+            )
+            execution = FunctionCall(function=function).execute()
+            assert execution.status == "failure"
+            assert execution.error == str(tool_error)
+            return SimpleNamespace(
+                content={"summary": "untrusted"},
+                is_paused=False,
+                tools=[
+                    ToolExecution(
+                        tool_name="read_file",
+                        tool_call_error=True,
+                        result=execution.error,
+                    )
+                ],
+            )
+
+    def agent_factory(**kwargs):
+        runtime_case.factory.calls.append(kwargs)
+        return ToolFailureAgent(kwargs)
+
+    runtime_case.runtime._agent_factory = agent_factory
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert outcome == Failed(stage="tool-execution", cause=tool_error)
+    assert outcome.cause is tool_error
 
 
 def test_unmarked_agno_error_is_provider_execution_failure(runtime_case):
@@ -456,4 +601,4 @@ def test_runtime_builds_agent_with_selected_governance(runtime_case):
     assert kwargs["db"] == "db"
     assert kwargs["tools"] == [runtime_case.read_tool]
     assert kwargs["instructions"] == list(runtime_case.invocation.plan.instructions)
-    assert len(kwargs["tool_hooks"]) == 1
+    assert len(kwargs["tool_hooks"]) == 2

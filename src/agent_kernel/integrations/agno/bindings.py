@@ -55,6 +55,12 @@ def capability_hook(
         raise ValueError("function names must be non-empty")
     if any(not function_name.strip() for function_name in internal_functions):
         raise ValueError("function names must be non-empty")
+    collisions = sorted(set(function_capabilities).intersection(internal_functions))
+    if collisions:
+        raise ValueError(
+            "application function names collide with internal functions: "
+            f"{collisions}"
+        )
 
     declared_capabilities = dict(function_capabilities)
 

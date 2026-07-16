@@ -78,6 +78,7 @@ class _AgnoLifecycle:
         *,
         run_kwargs: Mapping[str, object] | None = None,
         failure_stage: str,
+        persistence_failure_stage: str | None = None,
     ) -> RuntimeOutcome:
         try:
             kwargs = dict(run_kwargs or {})
@@ -92,8 +93,17 @@ class _AgnoLifecycle:
                     }
                 )
             response = agent.run(message, **kwargs)
-            if getattr(response, "is_paused", False):
+        except Exception as exc:
+            return Failed(stage=failure_stage, cause=exc)
+        if getattr(response, "is_paused", False):
+            try:
                 return self._pause(response, agent=agent, state=state)
+            except Exception as exc:
+                return Failed(
+                    stage=persistence_failure_stage or failure_stage,
+                    cause=exc,
+                )
+        try:
             return state.completion_adapter(response.content, response)
         except Exception as exc:
             return Failed(stage=failure_stage, cause=exc)
@@ -104,6 +114,7 @@ class _AgnoLifecycle:
         answers: dict[str, str],
         *,
         failure_stage: str,
+        persistence_failure_stage: str | None = None,
     ) -> RuntimeOutcome:
         record_key = pause.adapter_state
         if not isinstance(record_key, _PauseToken):
@@ -147,11 +158,17 @@ class _AgnoLifecycle:
                 **continue_kwargs,
             )
             if getattr(resumed, "is_paused", False):
-                outcome = self._pause(
-                    resumed,
-                    agent=record.agent,
-                    state=record.state,
-                )
+                try:
+                    outcome = self._pause(
+                        resumed,
+                        agent=record.agent,
+                        state=record.state,
+                    )
+                except Exception as exc:
+                    return Failed(
+                        stage=persistence_failure_stage or failure_stage,
+                        cause=exc,
+                    )
                 self._pause_records.pop(record_key, None)
                 return outcome
 
@@ -159,7 +176,7 @@ class _AgnoLifecycle:
             return record.state.completion_adapter(resumed.content, resumed)
         except UnsupportedRequirement as exc:
             self._pause_records.pop(record_key, None)
-            return Failed(stage="resume", cause=exc)
+            return Failed(stage=failure_stage, cause=exc)
         except Exception as exc:
             return Failed(stage=failure_stage, cause=exc)
 

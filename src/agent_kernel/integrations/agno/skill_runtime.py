@@ -1,5 +1,8 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+import math
+from pathlib import PurePosixPath, PureWindowsPath
+import re
 from typing import Any, TypeVar, cast
 
 from agno.agent import Agent
@@ -25,12 +28,115 @@ from agent_kernel.integrations.agno.skills import AgnoSkillProvider, SafeSkills
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
+_SENSITIVE_MODEL_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "authority",
+        "authorization",
+        "capabilities",
+        "capability",
+        "cookie",
+        "credential",
+        "credentials",
+        "envelope",
+        "invocation_handle",
+        "invocation_id",
+        "password",
+        "passwd",
+        "plan",
+        "principal",
+        "principal_id",
+        "private_key",
+        "refresh_token",
+        "secret",
+        "token",
+    }
+)
+_SENSITIVE_MODEL_KEY_PARTS = frozenset(
+    {"authorization", "credential", "credentials", "password", "passwd", "secret", "token"}
+)
+
+
+def _is_sensitive_model_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+    return normalized in _SENSITIVE_MODEL_KEYS or bool(
+        _SENSITIVE_MODEL_KEY_PARTS.intersection(normalized.split("_"))
+    )
+
+
+def _safe_model_projection(
+    value: object,
+    invocation: OperationInvocation[object],
+) -> object:
+    trusted_strings = {
+        invocation.invocation_id,
+        invocation.plan.envelope.principal_id,
+        *invocation.plan.capabilities,
+    }
+
+    def project(item: object) -> object:
+        if item is None or type(item) in (bool, int):
+            return item
+        if type(item) is float:
+            if not math.isfinite(item):
+                raise ValueError("model input must contain finite JSON numbers")
+            return item
+        if type(item) is str:
+            text = item
+            if text in trusted_strings:
+                raise ValueError("model input contains trusted identity or correlation state")
+            if PurePosixPath(text).is_absolute() or PureWindowsPath(text).is_absolute():
+                raise ValueError("model input contains an absolute host path")
+            return text
+        if type(item) is list or type(item) is tuple:
+            return [project(child) for child in cast(list[object] | tuple[object, ...], item)]
+        if type(item) is dict:
+            projected: dict[str, object] = {}
+            for key, child in cast(dict[object, object], item).items():
+                if not isinstance(key, str):
+                    raise TypeError("model input JSON object keys must be strings")
+                if _is_sensitive_model_key(key):
+                    raise ValueError(f"model input contains sensitive key: {key}")
+                project(key)
+                projected[key] = project(child)
+            return projected
+        raise TypeError("model input must be a JSON-compatible projection")
+
+    return project(value)
+
 
 @dataclass(frozen=True)
 class _SkillOperationState:
     invocation_id: str
     contract: OperationContract[Any, Any]
     resume_kwargs: Mapping[str, object]
+    tool_exceptions: "_ToolExceptionRecorder"
+
+
+class _ToolExceptionRecorder:
+    def __init__(self) -> None:
+        self._records: list[tuple[str, Exception]] = []
+
+    def hook(
+        self,
+        *,
+        function_name: str,
+        args: dict[str, Any],
+        function_call: Callable[..., Any],
+    ) -> Any:
+        try:
+            return function_call(**args)
+        except Exception as exc:
+            self._records.append((function_name, exc))
+            raise
+
+    def take(self, function_name: object) -> Exception | None:
+        for index, (recorded_name, exception) in enumerate(self._records):
+            if function_name is None or recorded_name == function_name:
+                self._records.pop(index)
+                return exception
+        return None
 
 
 class AgnoSkillRuntime:
@@ -113,10 +219,15 @@ class AgnoSkillRuntime:
             return Failed(stage="configuration", cause=exc)
 
         try:
-            message = contract.model_input_builder(validated_invocation)
+            built_message = contract.model_input_builder(validated_invocation)
+            message = _safe_model_projection(
+                built_message,
+                cast(OperationInvocation[object], validated_invocation),
+            )
         except Exception as exc:
             return Failed(stage="input-validation", cause=exc)
 
+        tool_exceptions = _ToolExceptionRecorder()
         operation_state = _SkillOperationState(
             invocation_id=validated_invocation.invocation_id,
             contract=cast(OperationContract[Any, Any], contract),
@@ -143,10 +254,11 @@ class AgnoSkillRuntime:
                     else None
                 ),
             },
+            tool_exceptions=tool_exceptions,
         )
 
         def complete(content: object, raw: object) -> Completed | Failed:
-            tool_failure = self._tool_failure(raw)
+            tool_failure = self._tool_failure(raw, operation_state.tool_exceptions)
             if tool_failure is not None:
                 return Failed(stage="tool-execution", cause=tool_failure)
             if getattr(raw, "status", None) == RunStatus.error:
@@ -186,7 +298,7 @@ class AgnoSkillRuntime:
                 output_schema=contract.model_output_type,
                 instructions=list(validated_invocation.plan.instructions),
                 tool_call_limit=validated_invocation.plan.tool_call_limit,
-                tool_hooks=[hook],
+                tool_hooks=[tool_exceptions.hook, hook],
             )
         except Exception as exc:
             return Failed(stage="provider-execution", cause=exc)
@@ -197,6 +309,7 @@ class AgnoSkillRuntime:
             state,
             run_kwargs={"run_id": validated_invocation.invocation_id},
             failure_stage="provider-execution",
+            persistence_failure_stage="hitl-persistence",
         )
 
     def resume(
@@ -207,7 +320,8 @@ class AgnoSkillRuntime:
         return self._lifecycle.resume(
             pause,
             answers,
-            failure_stage="provider-execution",
+            failure_stage="hitl-resumption",
+            persistence_failure_stage="hitl-persistence",
         )
 
     @staticmethod
@@ -238,9 +352,15 @@ class AgnoSkillRuntime:
         return selected
 
     @staticmethod
-    def _tool_failure(response: object) -> Exception | None:
+    def _tool_failure(
+        response: object,
+        recorder: _ToolExceptionRecorder,
+    ) -> Exception | None:
         for tool in getattr(response, "tools", None) or ():
             if getattr(tool, "tool_call_error", False):
+                recorded = recorder.take(getattr(tool, "tool_name", None))
+                if recorded is not None:
+                    return recorded
                 result = getattr(tool, "result", None)
                 if isinstance(result, Exception):
                     return result

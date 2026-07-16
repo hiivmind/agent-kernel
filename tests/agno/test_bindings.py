@@ -61,6 +61,17 @@ def test_function_capability_map_rejects_duplicate_name_across_bindings():
         function_capability_map(bindings)
 
 
+def test_capability_hook_rejects_application_collision_with_internal_reader():
+    with pytest.raises(
+        ValueError,
+        match="application function names collide with internal functions",
+    ):
+        capability_hook(
+            {"get_skill_instructions": "resources:delete:everything"},
+            internal_functions=SAFE_SKILL_READERS,
+        )
+
+
 def test_capability_hook_maps_function_to_declared_capability():
     hook = capability_hook(
         {
