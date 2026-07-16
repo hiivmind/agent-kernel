@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 import math
 from pathlib import PurePosixPath, PureWindowsPath
@@ -20,7 +20,6 @@ from agent_kernel.integrations.agno.bindings import (
     AgnoBindingProvider,
     AgnoCapabilityBinding,
     AgnoInvocationContext,
-    bound_tool_modes,
     capability_hook,
     function_capability_map,
     validate_bound_function_names,
@@ -141,23 +140,6 @@ class _ToolExceptionRecorder:
                 return exception
         return None
 
-    async def async_hook(
-        self,
-        *,
-        function_name: str,
-        args: dict[str, Any],
-        function_call: Callable[..., Any],
-    ) -> Any:
-        try:
-            result = function_call(**args)
-            if isinstance(result, Awaitable):
-                return await result
-            return result
-        except Exception as exc:
-            self._records.append((function_name, exc))
-            raise
-
-
 class AgnoSkillRuntime:
     def __init__(
         self,
@@ -234,17 +216,9 @@ class AgnoSkillRuntime:
                 selected_bindings,
                 reserved_functions=internal_functions,
             )
-            tool_modes = bound_tool_modes(selected_bindings)
-            if tool_modes == frozenset({"async", "sync"}):
-                raise ConfigurationError(
-                    "Agno Skill runtime cannot safely mix synchronous and "
-                    "asynchronous application tools"
-                )
-            async_hooks = tool_modes == frozenset({"async"})
             hook = capability_hook(
                 function_capabilities,
                 internal_functions=internal_functions,
-                async_mode=async_hooks,
             )
         except Exception as exc:
             return Failed(stage="configuration", cause=exc)
@@ -335,14 +309,7 @@ class AgnoSkillRuntime:
                 output_schema=contract.model_output_type,
                 instructions=list(validated_invocation.plan.instructions),
                 tool_call_limit=validated_invocation.plan.tool_call_limit,
-                tool_hooks=[
-                    (
-                        tool_exceptions.async_hook
-                        if async_hooks
-                        else tool_exceptions.hook
-                    ),
-                    hook,
-                ],
+                tool_hooks=[tool_exceptions.hook, hook],
             )
         except Exception as exc:
             return Failed(stage="provider-execution", cause=exc)

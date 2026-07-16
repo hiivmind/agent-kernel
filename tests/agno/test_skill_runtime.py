@@ -520,7 +520,81 @@ def test_mixed_sync_and_async_tools_fail_before_agent_construction(runtime_case)
 
     assert isinstance(outcome, Failed)
     assert outcome.stage == "configuration"
-    assert "mix synchronous and asynchronous" in str(outcome.cause)
+    assert "asynchronous application tools" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+async def _async_read_file() -> None:
+    await asyncio.sleep(0)
+
+
+_async_read_file.__name__ = "read_file"
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        _async_read_file,
+        Function(name="read_file", entrypoint=_async_read_file),
+    ],
+    ids=["callable", "function"],
+)
+def test_async_application_tool_fails_before_agent_construction(
+    runtime_case,
+    tool,
+):
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(tool,),
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "asynchronous application tools" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_same_name_sync_async_toolkit_fails_before_agent_construction(
+    runtime_case,
+):
+    def read_file() -> None:
+        return None
+
+    async def async_read_file() -> None:
+        await asyncio.sleep(0)
+
+    toolkit = Toolkit(
+        tools=(read_file,),
+        async_tools=((async_read_file, "read_file"),),
+    )
+    assert set(toolkit.functions) == {"read_file"}
+    assert set(toolkit.async_functions) == {"read_file"}
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(toolkit,),
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "asynchronous Toolkit functions" in str(outcome.cause)
     assert runtime_case.factory.calls == []
 
 
@@ -677,67 +751,6 @@ def test_real_agno_tool_execution_recovers_original_governed_exception(
     def agent_factory(**kwargs):
         runtime_case.factory.calls.append(kwargs)
         return ToolFailureAgent(kwargs)
-
-    runtime_case.runtime._agent_factory = agent_factory
-
-    outcome = runtime_case.runtime.execute(
-        runtime_case.invocation,
-        runtime_case.contract,
-    )
-
-    assert outcome == Failed(stage="tool-execution", cause=tool_error)
-    assert outcome.cause is tool_error
-
-
-def test_real_async_agno_tool_execution_recovers_original_exception(
-    runtime_case,
-):
-    tool_error = PermissionError("async governed tool rejected")
-
-    async def read_file() -> None:
-        await asyncio.sleep(0)
-        raise tool_error
-
-    runtime_case.binding_provider.bindings = {
-        "history:read": runtime_case.bindings["history:read"],
-        "resources:read:corpus-agno": AgnoCapabilityBinding(
-            "resources:read:corpus-agno",
-            tools=(read_file,),
-            function_names=frozenset({"read_file"}),
-        ),
-    }
-
-    class AsyncToolFailureAgent:
-        def __init__(self, kwargs):
-            self.kwargs = kwargs
-
-        def run(self, message, **kwargs):
-            del message
-            function = Function.from_callable(read_file)
-            function.tool_hooks = self.kwargs["tool_hooks"]
-            function._run_context = RunContext(
-                run_id="run-17",
-                session_id="session-3",
-                dependencies=kwargs["dependencies"],
-            )
-            execution = asyncio.run(FunctionCall(function=function).aexecute())
-            assert execution.status == "failure"
-            assert execution.error == str(tool_error)
-            return SimpleNamespace(
-                content={"summary": "untrusted"},
-                is_paused=False,
-                tools=[
-                    ToolExecution(
-                        tool_name="read_file",
-                        tool_call_error=True,
-                        result=execution.error,
-                    )
-                ],
-            )
-
-    def agent_factory(**kwargs):
-        runtime_case.factory.calls.append(kwargs)
-        return AsyncToolFailureAgent(kwargs)
 
     runtime_case.runtime._agent_factory = agent_factory
 

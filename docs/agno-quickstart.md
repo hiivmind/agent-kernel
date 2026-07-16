@@ -180,6 +180,12 @@ Its `get_skill_script_source` tool can read a bundled script but cannot execute
 it. Applications that want script execution must provide their own governed
 tool and capability binding.
 
+`AgnoSkillRuntime.execute` uses Agno's synchronous `Agent.run` boundary.
+Application-bound callables and `Function` entrypoints must therefore be
+synchronous, and a bound `Toolkit` must not contain any `async_functions`.
+Async surfaces fail configuration before Agent construction; a genuine async
+runtime API is required before they can be supported safely.
+
 See [Agno upstream issue reports](agno-upstream-issues.md) for the two
 non-blocking compatibility gaps behind that design.
 

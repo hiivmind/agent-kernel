@@ -1,4 +1,3 @@
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -94,34 +93,6 @@ def test_capability_hook_maps_function_to_declared_capability():
         args={"path": "config.yaml"},
         function_call=lambda **args: args["path"],
     ) == "config.yaml"
-
-
-def test_capability_hook_awaits_async_continuation():
-    envelope = AuthorityEnvelope(
-        "operator",
-        frozenset({"resources:read:corpus-agno"}),
-    )
-    hook = capability_hook(
-        {"read_file": "resources:read:corpus-agno"},
-        async_mode=True,
-    )
-
-    async def function_call(**args):
-        await asyncio.sleep(0)
-        return args["path"]
-
-    result = asyncio.run(
-        hook(
-            function_name="read_file",
-            run_context=SimpleNamespace(
-                dependencies={"agent_kernel_authority": envelope}
-            ),
-            args={"path": "config.yaml"},
-            function_call=function_call,
-        )
-    )
-
-    assert result == "config.yaml"
 
 
 @pytest.mark.parametrize("function_name", sorted(SAFE_SKILL_READERS))
