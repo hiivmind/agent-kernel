@@ -64,9 +64,25 @@ class AgnoSkillRuntime:
             return Failed(stage="input-validation", cause=exc)
 
         try:
-            skill = SafeSkills.from_source(
-                self._skill_provider.require(validated_invocation.target_id)
-            )
+            source = self._skill_provider.require(validated_invocation.target_id)
+            if source.id != validated_invocation.target_id:
+                raise ConfigurationError(
+                    "Agno Skill provider returned "
+                    f"{source.id!r} for target {validated_invocation.target_id!r}"
+                )
+            skill = SafeSkills.from_source(source)
+            loaded_skill_names = skill.get_skill_names()
+            if len(loaded_skill_names) != 1:
+                raise ConfigurationError(
+                    "Agno Skill source must load exactly one Skill; "
+                    f"loaded {loaded_skill_names!r}"
+                )
+            if loaded_skill_names[0] != source.id:
+                raise ConfigurationError(
+                    "loaded Agno Skill name "
+                    f"{loaded_skill_names[0]!r} does not match selected target "
+                    f"{source.id!r}"
+                )
         except Exception as exc:
             return Failed(stage="skill-load", cause=exc)
 
@@ -200,9 +216,11 @@ class AgnoSkillRuntime:
         bindings: Mapping[str, AgnoCapabilityBinding],
     ) -> dict[str, AgnoCapabilityBinding]:
         missing = sorted(invocation.plan.capabilities.difference(bindings))
-        if missing:
+        extra = sorted(set(bindings).difference(invocation.plan.capabilities))
+        if missing or extra:
             raise ConfigurationError(
-                f"missing Agno capability bindings: {missing}"
+                "Agno capability bindings must exactly match the plan; "
+                f"missing: {missing}; extra: {extra}"
             )
         selected = {
             capability: bindings[capability]

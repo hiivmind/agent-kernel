@@ -480,7 +480,7 @@ class StaticBindingProvider:
 
 def make_skill_runtime_case(tmp_path: Path, first_response, continue_responses):
     source = tmp_path / "status"
-    source.mkdir()
+    source.mkdir(parents=True)
     (source / "SKILL.md").write_text(
         "---\nname: status\ndescription: Test status\n---\nRead status safely.\n",
         encoding="utf-8",
@@ -564,31 +564,21 @@ def test_skill_resume_preserves_original_trusted_state_across_second_pause(
         case.contract,
         context=case.context,
     )
-    replacement_envelope = AuthorityEnvelope(
-        "replacement",
-        frozenset({"resources:read:corpus-other"}),
+    original_agent = case.factory.agents[0]
+    original_skill = case.factory.calls[0]["skills"]
+    assert isinstance(first_pause, Pause)
+    assert first_pause.envelope is case.invocation.plan.envelope
+    assert first_pause.runtime_context is case.context.run
+    assert original_skill.get_skill_names() == [case.invocation.target_id]
+    assert case.factory.calls[0]["instructions"] == list(
+        case.invocation.plan.instructions
     )
-    replacement_plan = replace(
-        case.invocation.plan,
-        capabilities=replacement_envelope.allowed,
-        envelope=replacement_envelope,
+    assert case.factory.calls[0]["tool_call_limit"] == (
+        case.invocation.plan.tool_call_limit
     )
-    replacement_invocation = replace(
-        case.invocation,
-        invocation_id="replacement-run",
-        plan=replacement_plan,
+    assert original_agent.run_calls[0][1]["run_id"] == (
+        case.invocation.invocation_id
     )
-    replacement_contract = replace(
-        case.contract,
-        output_adapter=TypeAdapter(str),
-    )
-    replacement_context = AgnoInvocationContext(
-        run=AgnoRunContext(user_id="replacement"),
-        invocation_handle=object(),
-    )
-    assert replacement_invocation.invocation_id == "replacement-run"
-    assert replacement_contract.output_adapter is not case.output_adapter
-    assert replacement_context is not case.context
 
     second_pause = case.runtime.resume(first_pause, {"scope": "workspace"})
     outcome = case.runtime.resume(second_pause, {"format": "summary"})
@@ -606,6 +596,8 @@ def test_skill_resume_preserves_original_trusted_state_across_second_pause(
     )
     assert case.output_adapter.values == [{"summary": "healthy"}]
     assert len(case.factory.agents) == 1
+    assert case.factory.agents[0] is original_agent
+    assert case.factory.calls[0]["skills"] is original_skill
     for _, kwargs in case.factory.agents[0].continue_calls:
         assert kwargs["run_id"] == "original-run"
         assert kwargs["dependencies"] == {
@@ -619,16 +611,31 @@ def test_skill_resume_preserves_original_trusted_state_across_second_pause(
 
 
 def test_skill_resume_rejects_pause_token_from_another_runtime(tmp_path):
-    first = paused_response(FakeRequirement([FakeField("scope")]))
-    case = make_skill_runtime_case(tmp_path, first, [])
-    pause = case.runtime.execute(
-        case.invocation,
-        case.contract,
-        context=case.context,
+    first_case = make_skill_runtime_case(
+        tmp_path / "first",
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
     )
-    foreign = replace(pause, adapter_state=object())
+    second_case = make_skill_runtime_case(
+        tmp_path / "second",
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
+    )
+    first_pause = first_case.runtime.execute(
+        first_case.invocation,
+        first_case.contract,
+        context=first_case.context,
+    )
+    second_pause = second_case.runtime.execute(
+        second_case.invocation,
+        second_case.contract,
+        context=second_case.context,
+    )
+    assert isinstance(first_pause, Pause)
+    assert isinstance(second_pause, Pause)
 
     with pytest.raises(ConfigurationError, match="pause"):
-        case.runtime.resume(foreign, {"scope": "workspace"})
+        first_case.runtime.resume(second_pause, {"scope": "workspace"})
 
-    assert case.factory.agents[0].continue_calls == []
+    assert first_case.factory.agents[0].continue_calls == []
+    assert second_case.factory.agents[0].continue_calls == []

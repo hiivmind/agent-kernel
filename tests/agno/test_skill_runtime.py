@@ -279,6 +279,74 @@ def test_missing_skill_fails_before_agent_construction(runtime_case):
     assert runtime_case.factory.calls == []
 
 
+def _write_skill(source: Path, name: str) -> None:
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Test {name}\n---\nRead safely.\n",
+        encoding="utf-8",
+    )
+
+
+def test_zero_loaded_skills_is_skill_load_failure(runtime_case, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    runtime_case.skill_provider.source = AgnoSkillSource("status", str(empty))
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "skill-load"
+    assert isinstance(outcome.cause, ConfigurationError)
+    assert "exactly one" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_multiple_loaded_skills_is_skill_load_failure(runtime_case, tmp_path):
+    collection = tmp_path / "collection"
+    _write_skill(collection / "alpha", "alpha")
+    _write_skill(collection / "beta", "beta")
+    runtime_case.skill_provider.source = AgnoSkillSource("status", str(collection))
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "skill-load"
+    assert isinstance(outcome.cause, ConfigurationError)
+    assert "exactly one" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_provider_skill_id_mismatch_is_skill_load_failure(runtime_case):
+    runtime_case.skill_provider.source = replace(
+        runtime_case.skill_provider.source,
+        id="different",
+    )
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "skill-load"
+    assert isinstance(outcome.cause, ConfigurationError)
+    assert "different" in str(outcome.cause)
+    assert "status" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_loaded_skill_name_mismatch_is_skill_load_failure(runtime_case, tmp_path):
+    different = tmp_path / "different"
+    _write_skill(different, "different")
+    runtime_case.skill_provider.source = AgnoSkillSource("status", str(different))
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "skill-load"
+    assert isinstance(outcome.cause, ConfigurationError)
+    assert "different" in str(outcome.cause)
+    assert "status" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
 def test_missing_capability_binding_fails_before_agent_construction(runtime_case):
     runtime_case.binding_provider.bindings = {
         "history:read": AgnoCapabilityBinding("history:read")
@@ -290,6 +358,23 @@ def test_missing_capability_binding_fails_before_agent_construction(runtime_case
     assert outcome.stage == "configuration"
     assert isinstance(outcome.cause, ConfigurationError)
     assert "resources:read:corpus-agno" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_extra_capability_binding_fails_before_agent_construction(runtime_case):
+    runtime_case.binding_provider.bindings = {
+        **runtime_case.bindings,
+        "resources:delete:everything": AgnoCapabilityBinding(
+            "resources:delete:everything"
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, runtime_case.contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert isinstance(outcome.cause, ConfigurationError)
+    assert "resources:delete:everything" in str(outcome.cause)
     assert runtime_case.factory.calls == []
 
 
