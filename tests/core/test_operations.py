@@ -8,6 +8,7 @@ from agent_kernel.core import (
     OperationCompletion,
     OperationContract,
     OperationInvocation,
+    OperationModelInput,
     OperationRuntime,
     SubjectContext,
     ValueAdapter,
@@ -61,6 +62,11 @@ def test_operation_completion_uses_trusted_invocation_id(plan):
 
 
 def test_operation_contract_and_protocol_shape_is_framework_neutral():
+    assert tuple(field.name for field in fields(OperationModelInput)) == (
+        "request",
+        "subject",
+        "inputs",
+    )
     assert tuple(field.name for field in fields(OperationContract)) == (
         "input_adapter",
         "output_adapter",
@@ -80,3 +86,16 @@ def test_operation_contract_and_protocol_shape_is_framework_neutral():
     )
     assert runtime_parameters["context"].kind is Parameter.KEYWORD_ONLY
     assert runtime_parameters["context"].default is None
+
+
+def test_operation_model_input_has_no_trusted_invocation_state(plan):
+    model_input = OperationModelInput(
+        request="status?",
+        subject=SubjectContext("corpus", "agno", {}),
+        inputs={"verbose": False},
+    )
+
+    assert not hasattr(model_input, "invocation_id")
+    assert not hasattr(model_input, "target_id")
+    assert not hasattr(model_input, "plan")
+    assert not hasattr(model_input, "envelope")

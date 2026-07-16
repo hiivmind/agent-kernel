@@ -59,11 +59,18 @@ class OperationInvocation(Generic[InputT]):
 
 
 @dataclass(frozen=True)
+class OperationModelInput(Generic[InputT]):
+    request: str
+    subject: SubjectContext
+    inputs: InputT
+
+
+@dataclass(frozen=True)
 class OperationContract(Generic[InputT, OutputT]):
     input_adapter: ValueAdapter[InputT]
     output_adapter: ValueAdapter[OutputT]
     model_output_type: type[OutputT]
-    model_input_builder: Callable[[OperationInvocation[InputT]], object]
+    model_input_builder: Callable[[OperationModelInput[InputT]], object]
 
 
 @dataclass(frozen=True)

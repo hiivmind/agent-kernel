@@ -1,6 +1,10 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from inspect import isawaitable, iscoroutinefunction
 from typing import Any, Protocol
+
+from agno.tools.function import Function
+from agno.tools.toolkit import Toolkit
 
 from agent_kernel.core.operations import OperationInvocation
 from agent_kernel.core.results import AuthorityEnvelope
@@ -33,6 +37,90 @@ class AgnoBindingProvider(Protocol):
         raise NotImplementedError
 
 
+def validate_bound_function_names(
+    bindings: Mapping[str, AgnoCapabilityBinding],
+    *,
+    reserved_functions: frozenset[str],
+) -> None:
+    owners: dict[str, str] = {}
+    for capability in sorted(bindings):
+        binding = bindings[capability]
+        actual: set[str] = set()
+        for tool in binding.tools:
+            if isinstance(tool, Function):
+                names = {tool.name}
+            elif isinstance(tool, Toolkit):
+                names = {
+                    function.name
+                    for function in tool.get_async_functions().values()
+                }
+            elif callable(tool):
+                name = getattr(tool, "__name__", None)
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(
+                        f"bound callable for {capability!r} has no exposed name"
+                    )
+                names = {name}
+            else:
+                raise TypeError(
+                    f"unsupported Agno tool binding for {capability!r}: "
+                    f"{type(tool).__name__}"
+                )
+            duplicates = sorted(actual.intersection(names))
+            if duplicates:
+                raise ValueError(
+                    f"duplicate actual function names for {capability!r}: {duplicates}"
+                )
+            actual.update(names)
+
+        collisions = sorted(actual.intersection(reserved_functions))
+        if collisions:
+            raise ValueError(
+                "application function names collide with internal functions: "
+                f"{collisions}"
+            )
+        if actual != set(binding.function_names):
+            raise ValueError(
+                f"declared function names do not match actual functions for "
+                f"{capability!r}; declared: {sorted(binding.function_names)}; "
+                f"actual: {sorted(actual)}"
+            )
+        for name in sorted(actual):
+            owner = owners.get(name)
+            if owner is not None:
+                raise ValueError(
+                    f"duplicate actual function name {name!r} in "
+                    f"{owner!r} and {capability!r}"
+                )
+            owners[name] = capability
+
+
+def bound_tool_modes(
+    bindings: Mapping[str, AgnoCapabilityBinding],
+) -> frozenset[str]:
+    modes: set[str] = set()
+    for binding in bindings.values():
+        for tool in binding.tools:
+            entrypoints: tuple[Callable[..., Any] | None, ...]
+            if isinstance(tool, Function):
+                entrypoints = (tool.entrypoint,)
+            elif isinstance(tool, Toolkit):
+                entrypoints = tuple(
+                    function.entrypoint
+                    for function in tool.get_async_functions().values()
+                )
+            elif callable(tool):
+                entrypoints = (tool,)
+            else:
+                continue
+            modes.update(
+                "async" if iscoroutinefunction(entrypoint) else "sync"
+                for entrypoint in entrypoints
+                if entrypoint is not None
+            )
+    return frozenset(modes)
+
+
 def function_capability_map(
     bindings: Mapping[str, AgnoCapabilityBinding],
 ) -> dict[str, str]:
@@ -50,6 +138,7 @@ def capability_hook(
     function_capabilities: Mapping[str, str],
     *,
     internal_functions: frozenset[str] = frozenset(),
+    async_mode: bool = False,
 ) -> Callable[..., Any]:
     if any(not function_name.strip() for function_name in function_capabilities):
         raise ValueError("function names must be non-empty")
@@ -64,16 +153,9 @@ def capability_hook(
 
     declared_capabilities = dict(function_capabilities)
 
-    def hook(
-        *,
-        function_name: str,
-        run_context: object,
-        args: dict[str, Any],
-        function_call: Callable[..., Any],
-    ) -> Any:
+    def authorize(function_name: str, run_context: object) -> None:
         if function_name in internal_functions:
-            return function_call(**args)
-
+            return
         dependencies = getattr(run_context, "dependencies", None) or {}
         envelope = dependencies.get("agent_kernel_authority")
         required_capability = declared_capabilities.get(function_name)
@@ -83,6 +165,32 @@ def capability_hook(
             or required_capability not in envelope.allowed
         ):
             raise PermissionError(f"principal may not call {function_name}")
+
+    if async_mode:
+
+        async def async_hook(
+            *,
+            function_name: str,
+            run_context: object,
+            args: dict[str, Any],
+            function_call: Callable[..., Any],
+        ) -> Any:
+            authorize(function_name, run_context)
+            result = function_call(**args)
+            if isawaitable(result):
+                return await result
+            return result
+
+        return async_hook
+
+    def hook(
+        *,
+        function_name: str,
+        run_context: object,
+        args: dict[str, Any],
+        function_call: Callable[..., Any],
+    ) -> Any:
+        authorize(function_name, run_context)
         return function_call(**args)
 
     return hook

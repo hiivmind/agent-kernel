@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 import math
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 from agno.run.base import RunContext, RunStatus
 from agno.models.response import ToolExecution
 from agno.tools.function import Function, FunctionCall
+from agno.tools.toolkit import Toolkit
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from agent_kernel.core.errors import ConfigurationError
@@ -149,7 +151,7 @@ def runtime_case(tmp_path: Path):
         ),
         invocation_handle=handle,
     )
-    read_tool = object()
+    read_tool = Function(name="read_file", entrypoint=lambda: None)
     bindings = {
         "resources:read:corpus-agno": AgnoCapabilityBinding(
             "resources:read:corpus-agno",
@@ -241,7 +243,9 @@ def _objects_in(value: object) -> list[object]:
 
 
 def test_runtime_selects_tools_in_capability_then_declared_order(runtime_case):
-    first, second, third = object(), object(), object()
+    first = Function(name="read_history", entrypoint=lambda: None)
+    second = Function(name="read_file", entrypoint=lambda: None)
+    third = Function(name="fetch_url", entrypoint=lambda: None)
     runtime_case.binding_provider.bindings = {
         "resources:read:corpus-agno": AgnoCapabilityBinding(
             "resources:read:corpus-agno",
@@ -407,6 +411,12 @@ def test_reserved_reader_binding_is_configuration_failure_before_agent(
         "history:read": runtime_case.bindings["history:read"],
         "resources:read:corpus-agno": AgnoCapabilityBinding(
             "resources:read:corpus-agno",
+            tools=(
+                Function(
+                    name="get_skill_instructions",
+                    entrypoint=lambda: None,
+                ),
+            ),
             function_names=frozenset({"get_skill_instructions"}),
         ),
     }
@@ -419,6 +429,98 @@ def test_reserved_reader_binding_is_configuration_failure_before_agent(
     assert isinstance(outcome, Failed)
     assert outcome.stage == "configuration"
     assert "collide with internal functions" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def _reserved_reader_callable() -> None:
+    return None
+
+
+_reserved_reader_callable.__name__ = "get_skill_reference"
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        Function(name="get_skill_reference", entrypoint=lambda: None),
+        _reserved_reader_callable,
+        Toolkit(tools=(_reserved_reader_callable,)),
+    ],
+    ids=["function", "callable", "toolkit"],
+)
+def test_actual_reserved_tool_name_is_rejected_before_agent(
+    runtime_case,
+    tool,
+):
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(tool,),
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "get_skill_reference" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_declared_names_must_exactly_match_actual_callable_names(runtime_case):
+    def fetch_url() -> None:
+        return None
+
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(fetch_url,),
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "declared" in str(outcome.cause)
+    assert "actual" in str(outcome.cause)
+    assert runtime_case.factory.calls == []
+
+
+def test_mixed_sync_and_async_tools_fail_before_agent_construction(runtime_case):
+    def read_file() -> None:
+        return None
+
+    async def fetch_url() -> None:
+        await asyncio.sleep(0)
+
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(read_file, fetch_url),
+            function_names=frozenset({"read_file", "fetch_url"}),
+        ),
+    }
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "configuration"
+    assert "mix synchronous and asynchronous" in str(outcome.cause)
     assert runtime_case.factory.calls == []
 
 
@@ -487,6 +589,29 @@ def test_model_input_builder_cannot_leak_invocation_handle(runtime_case):
     assert runtime_case.factory.calls == []
 
 
+@pytest.mark.parametrize(
+    "builder",
+    [
+        lambda item: {"plan": repr(item.plan)},
+        lambda item: {"correlation": item.invocation_id[::-1]},
+        lambda item: {"target": item.target_id},
+    ],
+    ids=["plan-repr", "transformed-invocation-id", "target-id"],
+)
+def test_model_input_builder_cannot_reach_trusted_invocation_fields(
+    runtime_case,
+    builder,
+):
+    contract = replace(runtime_case.contract, model_input_builder=builder)
+
+    outcome = runtime_case.runtime.execute(runtime_case.invocation, contract)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "input-validation"
+    assert isinstance(outcome.cause, AttributeError)
+    assert runtime_case.factory.calls == []
+
+
 def test_provider_exception_is_provider_execution_failure(runtime_case):
     provider_error = RuntimeError("provider unavailable")
     runtime_case.factory.error = provider_error
@@ -552,6 +677,67 @@ def test_real_agno_tool_execution_recovers_original_governed_exception(
     def agent_factory(**kwargs):
         runtime_case.factory.calls.append(kwargs)
         return ToolFailureAgent(kwargs)
+
+    runtime_case.runtime._agent_factory = agent_factory
+
+    outcome = runtime_case.runtime.execute(
+        runtime_case.invocation,
+        runtime_case.contract,
+    )
+
+    assert outcome == Failed(stage="tool-execution", cause=tool_error)
+    assert outcome.cause is tool_error
+
+
+def test_real_async_agno_tool_execution_recovers_original_exception(
+    runtime_case,
+):
+    tool_error = PermissionError("async governed tool rejected")
+
+    async def read_file() -> None:
+        await asyncio.sleep(0)
+        raise tool_error
+
+    runtime_case.binding_provider.bindings = {
+        "history:read": runtime_case.bindings["history:read"],
+        "resources:read:corpus-agno": AgnoCapabilityBinding(
+            "resources:read:corpus-agno",
+            tools=(read_file,),
+            function_names=frozenset({"read_file"}),
+        ),
+    }
+
+    class AsyncToolFailureAgent:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+
+        def run(self, message, **kwargs):
+            del message
+            function = Function.from_callable(read_file)
+            function.tool_hooks = self.kwargs["tool_hooks"]
+            function._run_context = RunContext(
+                run_id="run-17",
+                session_id="session-3",
+                dependencies=kwargs["dependencies"],
+            )
+            execution = asyncio.run(FunctionCall(function=function).aexecute())
+            assert execution.status == "failure"
+            assert execution.error == str(tool_error)
+            return SimpleNamespace(
+                content={"summary": "untrusted"},
+                is_paused=False,
+                tools=[
+                    ToolExecution(
+                        tool_name="read_file",
+                        tool_call_error=True,
+                        result=execution.error,
+                    )
+                ],
+            )
+
+    def agent_factory(**kwargs):
+        runtime_case.factory.calls.append(kwargs)
+        return AsyncToolFailureAgent(kwargs)
 
     runtime_case.runtime._agent_factory = agent_factory
 

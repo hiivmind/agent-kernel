@@ -67,6 +67,7 @@ from agent_kernel import (
     ExecutionPlan,
     OperationContract,
     OperationInvocation,
+    OperationModelInput,
     SubjectContext,
 )
 from agent_kernel.integrations.agno import (
@@ -138,11 +139,17 @@ invocation = OperationInvocation(
     inputs=StatusRequest(resource_id="service-42"),
     plan=plan,
 )
+
+
+def build_model_input(item: OperationModelInput[StatusRequest]) -> object:
+    return item.inputs.model_dump()
+
+
 contract = OperationContract(
     input_adapter=TypeAdapter(StatusRequest),
     output_adapter=TypeAdapter(StatusResult),
     model_output_type=StatusResult,
-    model_input_builder=lambda item: item.inputs.model_dump(),
+    model_input_builder=build_model_input,
 )
 runtime = AgnoSkillRuntime(
     skill_provider=LocalStatusSkill(),
@@ -160,6 +167,13 @@ outcome = runtime.execute(
 runtime adds correlation outside the model schema as the
 `OperationCompletion.invocation_id`, so the model cannot supply or overwrite
 it.
+
+The contract's `model_input_builder` receives an `OperationModelInput`, not
+the trusted `OperationInvocation`. This framework-neutral DTO exposes only the
+request, the validated inputs, and descriptive subject context. It has no
+invocation ID, target ID, execution plan, authority envelope, or runtime
+handle; the runtime also validates the builder result as a plain JSON
+projection before passing it to Agno.
 
 `SafeSkills` exposes Skill instructions, references, and script **source**.
 Its `get_skill_script_source` tool can read a bundled script but cannot execute
