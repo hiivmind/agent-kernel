@@ -1,9 +1,17 @@
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel, TypeAdapter
 
 from agent_kernel.core.errors import ConfigurationError
+from agent_kernel.core.operations import (
+    OperationCompletion,
+    OperationContract,
+    OperationInvocation,
+    SubjectContext,
+)
 from agent_kernel.core.results import (
     AuthorityEnvelope,
     Completed,
@@ -12,7 +20,13 @@ from agent_kernel.core.results import (
     Pause,
 )
 from agent_kernel.integrations.agno import AgnoRunContext, AgnoRuntime
+from agent_kernel.integrations.agno.bindings import (
+    AgnoCapabilityBinding,
+    AgnoInvocationContext,
+)
 from agent_kernel.integrations.agno.hitl import UnsupportedRequirement
+from agent_kernel.integrations.agno.skill_runtime import AgnoSkillRuntime
+from agent_kernel.integrations.agno.skills import AgnoSkillSource
 
 
 class FakeField:
@@ -429,3 +443,192 @@ def test_resume_can_pause_again_and_then_complete_on_same_agent(plan):
         call[1]["dependencies"]["agent_kernel_authority"]
         for call in factory.agents[0].continue_calls
     ] == [plan.envelope, plan.envelope]
+
+
+class HitlInput(BaseModel):
+    verbose: bool
+
+
+class HitlOutput(BaseModel):
+    summary: str
+
+
+class RecordingAdapter:
+    def __init__(self):
+        self.values = []
+
+    def validate_python(self, value):
+        self.values.append(value)
+        return HitlOutput.model_validate(value)
+
+
+class StaticSkillProvider:
+    def __init__(self, source):
+        self.source = source
+
+    def require(self, skill_id):
+        return self.source
+
+
+class StaticBindingProvider:
+    def __init__(self, bindings):
+        self.bindings = bindings
+
+    def bindings_for(self, invocation, context):
+        return self.bindings
+
+
+def make_skill_runtime_case(tmp_path: Path, first_response, continue_responses):
+    source = tmp_path / "status"
+    source.mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: status\ndescription: Test status\n---\nRead status safely.\n",
+        encoding="utf-8",
+    )
+    envelope = AuthorityEnvelope(
+        "original-principal",
+        frozenset({"resources:read:corpus-agno"}),
+    )
+    plan = ExecutionPlan(
+        action="status",
+        label="Status",
+        capabilities=envelope.allowed,
+        instructions=("Read status.",),
+        tool_call_limit=3,
+        reads_history=False,
+        envelope=envelope,
+        reason=None,
+    )
+    invocation = OperationInvocation(
+        invocation_id="original-run",
+        target_id="status",
+        request="status?",
+        subject=SubjectContext("corpus", "agno", {}),
+        inputs=HitlInput(verbose=False),
+        plan=plan,
+    )
+    output_adapter = RecordingAdapter()
+    contract = OperationContract(
+        input_adapter=TypeAdapter(HitlInput),
+        output_adapter=output_adapter,
+        model_output_type=HitlOutput,
+        model_input_builder=lambda item: {"request": item.request},
+    )
+    handle = object()
+    context = AgnoInvocationContext(
+        run=AgnoRunContext(
+            user_id="original-principal",
+            session_id="original-session",
+            session_state={"original": True},
+            metadata={"trace": "original"},
+        ),
+        invocation_handle=handle,
+    )
+    factory = FakeAgentFactory(
+        first_response,
+        continue_responses=continue_responses,
+    )
+    runtime = AgnoSkillRuntime(
+        skill_provider=StaticSkillProvider(
+            AgnoSkillSource("status", str(source))
+        ),
+        binding_provider=StaticBindingProvider(
+            {
+                "resources:read:corpus-agno": AgnoCapabilityBinding(
+                    "resources:read:corpus-agno"
+                )
+            }
+        ),
+        agent_factory=factory,
+    )
+    return SimpleNamespace(
+        runtime=runtime,
+        invocation=invocation,
+        contract=contract,
+        context=context,
+        handle=handle,
+        factory=factory,
+        output_adapter=output_adapter,
+    )
+
+
+def test_skill_resume_preserves_original_trusted_state_across_second_pause(
+    tmp_path,
+):
+    first = paused_response(FakeRequirement([FakeField("scope")]))
+    second = paused_response(FakeRequirement([FakeField("format")]))
+    finished = completed_response({"summary": "healthy"})
+    case = make_skill_runtime_case(tmp_path, first, [second, finished])
+    first_pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+    replacement_envelope = AuthorityEnvelope(
+        "replacement",
+        frozenset({"resources:read:corpus-other"}),
+    )
+    replacement_plan = replace(
+        case.invocation.plan,
+        capabilities=replacement_envelope.allowed,
+        envelope=replacement_envelope,
+    )
+    replacement_invocation = replace(
+        case.invocation,
+        invocation_id="replacement-run",
+        plan=replacement_plan,
+    )
+    replacement_contract = replace(
+        case.contract,
+        output_adapter=TypeAdapter(str),
+    )
+    replacement_context = AgnoInvocationContext(
+        run=AgnoRunContext(user_id="replacement"),
+        invocation_handle=object(),
+    )
+    assert replacement_invocation.invocation_id == "replacement-run"
+    assert replacement_contract.output_adapter is not case.output_adapter
+    assert replacement_context is not case.context
+
+    second_pause = case.runtime.resume(first_pause, {"scope": "workspace"})
+    outcome = case.runtime.resume(second_pause, {"format": "summary"})
+
+    assert isinstance(second_pause, Pause)
+    assert second_pause.envelope is case.invocation.plan.envelope
+    assert second_pause.runtime_context is case.context.run
+    assert outcome == Completed(
+        content=OperationCompletion(
+            invocation_id="original-run",
+            output=HitlOutput(summary="healthy"),
+            raw=finished,
+        ),
+        raw=finished,
+    )
+    assert case.output_adapter.values == [{"summary": "healthy"}]
+    assert len(case.factory.agents) == 1
+    for _, kwargs in case.factory.agents[0].continue_calls:
+        assert kwargs["run_id"] == "original-run"
+        assert kwargs["dependencies"] == {
+            "agent_kernel_authority": case.invocation.plan.envelope,
+            "agent_kernel_invocation_handle": case.handle,
+        }
+        assert kwargs["user_id"] == "original-principal"
+        assert kwargs["session_id"] == "original-session"
+        assert kwargs["session_state"] == {"original": True}
+        assert kwargs["metadata"] == {"trace": "original"}
+
+
+def test_skill_resume_rejects_pause_token_from_another_runtime(tmp_path):
+    first = paused_response(FakeRequirement([FakeField("scope")]))
+    case = make_skill_runtime_case(tmp_path, first, [])
+    pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+    foreign = replace(pause, adapter_state=object())
+
+    with pytest.raises(ConfigurationError, match="pause"):
+        case.runtime.resume(foreign, {"scope": "workspace"})
+
+    assert case.factory.agents[0].continue_calls == []

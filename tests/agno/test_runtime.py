@@ -179,7 +179,8 @@ def test_runtime_omits_context_fields_when_context_is_not_supplied(plan):
 
 
 def test_runtime_returns_completed_response(plan):
-    response = SimpleNamespace(content={"result": 17}, is_paused=False)
+    content = {"result": 17}
+    response = SimpleNamespace(content=content, is_paused=False)
     runtime = AgnoRuntime(
         tools={"alpha_tool": object(), "zeta_tool": object()},
         agent_factory=FakeAgentFactory(response),
@@ -187,7 +188,9 @@ def test_runtime_returns_completed_response(plan):
 
     outcome = runtime.execute("spin", plan)
 
-    assert outcome == Completed(content={"result": 17}, raw=response)
+    assert outcome == Completed(content=content, raw=response)
+    assert outcome.content is content
+    assert outcome.raw is response
 
 
 def test_runtime_minimally_translates_paused_response(plan):
