@@ -8,11 +8,18 @@ def test_supported_core_api_is_top_level():
         Intent,
         Kernel,
         KernelConfig,
+        OperationCompletion,
+        OperationContract,
+        OperationInvocation,
+        OperationModelInput,
+        OperationRuntime,
         Pause,
         Principal,
         Registry,
         Role,
+        SubjectContext,
         TurnResult,
+        ValueAdapter,
     )
 
     assert all(
@@ -25,11 +32,44 @@ def test_supported_core_api_is_top_level():
             Intent,
             Kernel,
             KernelConfig,
+            OperationCompletion,
+            OperationContract,
+            OperationInvocation,
+            OperationModelInput,
+            OperationRuntime,
             Pause,
             Principal,
             Registry,
             Role,
+            SubjectContext,
             TurnResult,
+            ValueAdapter,
+        )
+    )
+
+
+def test_supported_agno_operation_api_is_exported():
+    from agent_kernel.integrations.agno import (
+        AgnoBindingProvider,
+        AgnoCapabilityBinding,
+        AgnoInvocationContext,
+        AgnoSkillProvider,
+        AgnoSkillRuntime,
+        AgnoSkillSource,
+        SafeSkills,
+        capability_hook,
+    )
+
+    assert all(
+        (
+            AgnoBindingProvider,
+            AgnoCapabilityBinding,
+            AgnoInvocationContext,
+            AgnoSkillProvider,
+            AgnoSkillRuntime,
+            AgnoSkillSource,
+            SafeSkills,
+            capability_hook,
         )
     )
 

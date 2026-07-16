@@ -49,3 +49,151 @@ print(turn.outcome)
 hardcoded. Classification has no tools. Execution exposes only tools named by
 the authorized plan, stamps the immutable authority envelope into Agno's run
 dependencies, and fails closed when a binding is missing.
+
+## Execute a governed Agent Skill operation
+
+An operation selects exactly one Skill and binds logical capabilities to the
+concrete tools available for that invocation. The example below uses one local
+Skill provider, an authorization-only `skills:invoke:status` binding, and a
+resource binding for the `read_status` function.
+
+```python
+from collections.abc import Mapping
+
+from pydantic import BaseModel, TypeAdapter
+
+from agent_kernel import (
+    AuthorityEnvelope,
+    ExecutionPlan,
+    OperationContract,
+    OperationInvocation,
+    OperationModelInput,
+    SubjectContext,
+)
+from agent_kernel.integrations.agno import (
+    AgnoCapabilityBinding,
+    AgnoInvocationContext,
+    AgnoSkillRuntime,
+    AgnoSkillSource,
+)
+
+
+class StatusRequest(BaseModel):
+    resource_id: str
+
+
+class StatusResult(BaseModel):
+    status: str
+
+
+class LocalStatusSkill:
+    def require(self, skill_id: str) -> AgnoSkillSource:
+        if skill_id != "status":
+            raise KeyError(skill_id)
+        return AgnoSkillSource("status", "/srv/agent-skills/status")
+
+
+def read_status(resource_id: str) -> str:
+    return application_status_store.read(resource_id)
+
+
+class StatusBindings:
+    def bindings_for(
+        self,
+        invocation: OperationInvocation[object],
+        context: AgnoInvocationContext,
+    ) -> Mapping[str, AgnoCapabilityBinding]:
+        del invocation, context
+        return {
+            # Authorizes selection of the Skill; it exposes no external tool.
+            "skills:invoke:status": AgnoCapabilityBinding(
+                "skills:invoke:status"
+            ),
+            "resources:read:status": AgnoCapabilityBinding(
+                "resources:read:status",
+                tools=(read_status,),
+                function_names=frozenset({"read_status"}),
+            ),
+        }
+
+
+capabilities = frozenset(
+    {"skills:invoke:status", "resources:read:status"}
+)
+envelope = AuthorityEnvelope("member-1", capabilities)
+plan = ExecutionPlan(
+    action="status",
+    label="Read status",
+    capabilities=capabilities,
+    instructions=("Load the status Skill and report the resource status.",),
+    tool_call_limit=2,
+    reads_history=False,
+    envelope=envelope,
+    reason=None,
+)
+invocation = OperationInvocation(
+    invocation_id="invocation-17",
+    target_id="status",
+    request="Check the selected resource.",
+    subject=SubjectContext(kind="resource", id="service-42", attributes={}),
+    inputs=StatusRequest(resource_id="service-42"),
+    plan=plan,
+)
+
+
+def build_model_input(item: OperationModelInput[StatusRequest]) -> object:
+    return item.inputs.model_dump()
+
+
+contract = OperationContract(
+    input_adapter=TypeAdapter(StatusRequest),
+    output_adapter=TypeAdapter(StatusResult),
+    model_output_type=StatusResult,
+    model_input_builder=build_model_input,
+)
+runtime = AgnoSkillRuntime(
+    skill_provider=LocalStatusSkill(),
+    binding_provider=StatusBindings(),
+    model=application_model,
+)
+outcome = runtime.execute(
+    invocation,
+    contract,
+    context=AgnoInvocationContext(),
+)
+```
+
+`StatusResult` deliberately contains only model-produced business data. The
+runtime adds correlation outside the model schema as the
+`OperationCompletion.invocation_id`, so the model cannot supply or overwrite
+it.
+
+The contract's `model_input_builder` receives an `OperationModelInput`, not
+the trusted `OperationInvocation`. This framework-neutral DTO exposes only the
+request, the validated inputs, and descriptive subject context. It has no
+invocation ID, target ID, execution plan, authority envelope, or runtime
+handle; the runtime also validates the builder result as a plain JSON
+projection before passing it to Agno.
+
+`SafeSkills` exposes Skill instructions, references, and script **source**.
+Its `get_skill_script_source` tool can read a bundled script but cannot execute
+it. Applications that want script execution must provide their own governed
+tool and capability binding.
+
+`AgnoSkillRuntime.execute` uses Agno's synchronous `Agent.run` boundary.
+Application-bound callables and `Function` entrypoints must therefore be
+synchronous, and a bound `Toolkit` must not contain any `async_functions`.
+Async surfaces fail configuration before Agent construction; a genuine async
+runtime API is required before they can be supported safely.
+
+See [Agno upstream issue reports](agno-upstream-issues.md) for the two
+non-blocking compatibility gaps behind that design.
+
+## Human-in-the-loop state
+
+Agno pause tokens are opaque and process-local. The runtime retains the
+corresponding Agent, authority, invocation state, and requirement snapshot in
+memory until that pause is resumed; a second pause replaces the first token
+with a new retained record. Tokens do not survive a process restart and are
+not a durable workflow store. Explicit cleanup and expiry for pauses that are
+never resumed remains a lifecycle follow-up.

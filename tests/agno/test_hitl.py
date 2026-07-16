@@ -1,9 +1,17 @@
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel, TypeAdapter
 
 from agent_kernel.core.errors import ConfigurationError
+from agent_kernel.core.operations import (
+    OperationCompletion,
+    OperationContract,
+    OperationInvocation,
+    SubjectContext,
+)
 from agent_kernel.core.results import (
     AuthorityEnvelope,
     Completed,
@@ -12,7 +20,13 @@ from agent_kernel.core.results import (
     Pause,
 )
 from agent_kernel.integrations.agno import AgnoRunContext, AgnoRuntime
+from agent_kernel.integrations.agno.bindings import (
+    AgnoCapabilityBinding,
+    AgnoInvocationContext,
+)
 from agent_kernel.integrations.agno.hitl import UnsupportedRequirement
+from agent_kernel.integrations.agno.skill_runtime import AgnoSkillRuntime
+from agent_kernel.integrations.agno.skills import AgnoSkillSource
 
 
 class FakeField:
@@ -60,6 +74,18 @@ def completed_response(content="finished"):
         is_paused=False,
         requirements=[],
     )
+
+
+class BrokenPauseResponse:
+    content = None
+    is_paused = True
+
+    def __init__(self, error):
+        self.error = error
+
+    @property
+    def active_requirements(self):
+        raise self.error
 
 
 class FakeAgent:
@@ -350,6 +376,17 @@ def test_resume_returns_typed_failure_for_unsupported_requirement(
     assert factory.agents[0].continue_calls == []
 
 
+def test_legacy_pause_translation_failure_remains_runtime_stage(plan):
+    error = RuntimeError("pause state unavailable")
+    runtime = make_runtime(FakeAgentFactory(BrokenPauseResponse(error)))
+
+    outcome = runtime.execute("spin", plan)
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "runtime"
+    assert outcome.cause is error
+
+
 def test_resume_returns_typed_failure_when_declared_answer_is_missing(
     plan,
 ):
@@ -429,3 +466,257 @@ def test_resume_can_pause_again_and_then_complete_on_same_agent(plan):
         call[1]["dependencies"]["agent_kernel_authority"]
         for call in factory.agents[0].continue_calls
     ] == [plan.envelope, plan.envelope]
+
+
+class HitlInput(BaseModel):
+    verbose: bool
+
+
+class HitlOutput(BaseModel):
+    summary: str
+
+
+class RecordingAdapter:
+    def __init__(self):
+        self.values = []
+
+    def validate_python(self, value):
+        self.values.append(value)
+        return HitlOutput.model_validate(value)
+
+
+class StaticSkillProvider:
+    def __init__(self, source):
+        self.source = source
+
+    def require(self, skill_id):
+        return self.source
+
+
+class StaticBindingProvider:
+    def __init__(self, bindings):
+        self.bindings = bindings
+
+    def bindings_for(self, invocation, context):
+        return self.bindings
+
+
+def make_skill_runtime_case(tmp_path: Path, first_response, continue_responses):
+    source = tmp_path / "status"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: status\ndescription: Test status\n---\nRead status safely.\n",
+        encoding="utf-8",
+    )
+    envelope = AuthorityEnvelope(
+        "original-principal",
+        frozenset({"resources:read:corpus-agno"}),
+    )
+    plan = ExecutionPlan(
+        action="status",
+        label="Status",
+        capabilities=envelope.allowed,
+        instructions=("Read status.",),
+        tool_call_limit=3,
+        reads_history=False,
+        envelope=envelope,
+        reason=None,
+    )
+    invocation = OperationInvocation(
+        invocation_id="original-run",
+        target_id="status",
+        request="status?",
+        subject=SubjectContext("corpus", "agno", {}),
+        inputs=HitlInput(verbose=False),
+        plan=plan,
+    )
+    output_adapter = RecordingAdapter()
+    contract = OperationContract(
+        input_adapter=TypeAdapter(HitlInput),
+        output_adapter=output_adapter,
+        model_output_type=HitlOutput,
+        model_input_builder=lambda item: {"request": item.request},
+    )
+    handle = object()
+    context = AgnoInvocationContext(
+        run=AgnoRunContext(
+            user_id="original-principal",
+            session_id="original-session",
+            session_state={"original": True},
+            metadata={"trace": "original"},
+        ),
+        invocation_handle=handle,
+    )
+    factory = FakeAgentFactory(
+        first_response,
+        continue_responses=continue_responses,
+    )
+    runtime = AgnoSkillRuntime(
+        skill_provider=StaticSkillProvider(
+            AgnoSkillSource("status", str(source))
+        ),
+        binding_provider=StaticBindingProvider(
+            {
+                "resources:read:corpus-agno": AgnoCapabilityBinding(
+                    "resources:read:corpus-agno"
+                )
+            }
+        ),
+        agent_factory=factory,
+    )
+    return SimpleNamespace(
+        runtime=runtime,
+        invocation=invocation,
+        contract=contract,
+        context=context,
+        handle=handle,
+        factory=factory,
+        output_adapter=output_adapter,
+    )
+
+
+def test_skill_resume_preserves_original_trusted_state_across_second_pause(
+    tmp_path,
+):
+    first = paused_response(FakeRequirement([FakeField("scope")]))
+    second = paused_response(FakeRequirement([FakeField("format")]))
+    finished = completed_response({"summary": "healthy"})
+    case = make_skill_runtime_case(tmp_path, first, [second, finished])
+    first_pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+    original_agent = case.factory.agents[0]
+    original_skill = case.factory.calls[0]["skills"]
+    assert isinstance(first_pause, Pause)
+    assert first_pause.envelope is case.invocation.plan.envelope
+    assert first_pause.runtime_context is case.context.run
+    assert original_skill.get_skill_names() == [case.invocation.target_id]
+    assert case.factory.calls[0]["instructions"] == list(
+        case.invocation.plan.instructions
+    )
+    assert case.factory.calls[0]["tool_call_limit"] == (
+        case.invocation.plan.tool_call_limit
+    )
+    assert original_agent.run_calls[0][1]["run_id"] == (
+        case.invocation.invocation_id
+    )
+
+    second_pause = case.runtime.resume(first_pause, {"scope": "workspace"})
+    outcome = case.runtime.resume(second_pause, {"format": "summary"})
+
+    assert isinstance(second_pause, Pause)
+    assert second_pause.envelope is case.invocation.plan.envelope
+    assert second_pause.runtime_context is case.context.run
+    assert outcome == Completed(
+        content=OperationCompletion(
+            invocation_id="original-run",
+            output=HitlOutput(summary="healthy"),
+            raw=finished,
+        ),
+        raw=finished,
+    )
+    assert case.output_adapter.values == [{"summary": "healthy"}]
+    assert len(case.factory.agents) == 1
+    assert case.factory.agents[0] is original_agent
+    assert case.factory.calls[0]["skills"] is original_skill
+    for _, kwargs in case.factory.agents[0].continue_calls:
+        assert kwargs["run_id"] == "original-run"
+        assert kwargs["dependencies"] == {
+            "agent_kernel_authority": case.invocation.plan.envelope,
+            "agent_kernel_invocation_handle": case.handle,
+        }
+        assert kwargs["user_id"] == "original-principal"
+        assert kwargs["session_id"] == "original-session"
+        assert kwargs["session_state"] == {"original": True}
+        assert kwargs["metadata"] == {"trace": "original"}
+
+
+def test_skill_resume_rejects_pause_token_from_another_runtime(tmp_path):
+    first_case = make_skill_runtime_case(
+        tmp_path / "first",
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
+    )
+    second_case = make_skill_runtime_case(
+        tmp_path / "second",
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
+    )
+    first_pause = first_case.runtime.execute(
+        first_case.invocation,
+        first_case.contract,
+        context=first_case.context,
+    )
+    second_pause = second_case.runtime.execute(
+        second_case.invocation,
+        second_case.contract,
+        context=second_case.context,
+    )
+    assert isinstance(first_pause, Pause)
+    assert isinstance(second_pause, Pause)
+
+    with pytest.raises(ConfigurationError, match="pause"):
+        first_case.runtime.resume(second_pause, {"scope": "workspace"})
+
+    assert first_case.factory.agents[0].continue_calls == []
+    assert second_case.factory.agents[0].continue_calls == []
+
+
+def test_skill_pause_translation_failure_is_hitl_persistence(tmp_path):
+    error = RuntimeError("pause state unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        BrokenPauseResponse(error),
+        [],
+    )
+
+    outcome = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "hitl-persistence"
+    assert outcome.cause is error
+
+
+def test_skill_second_pause_translation_failure_is_hitl_persistence(tmp_path):
+    error = RuntimeError("second pause state unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [BrokenPauseResponse(error)],
+    )
+    pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+
+    outcome = case.runtime.resume(pause, {"scope": "workspace"})
+
+    assert isinstance(outcome, Failed)
+    assert outcome.stage == "hitl-persistence"
+    assert outcome.cause is error
+
+
+def test_skill_continuation_failure_is_hitl_resumption(tmp_path):
+    error = RuntimeError("continuation unavailable")
+    case = make_skill_runtime_case(
+        tmp_path,
+        paused_response(FakeRequirement([FakeField("scope")])),
+        [],
+    )
+    pause = case.runtime.execute(
+        case.invocation,
+        case.contract,
+        context=case.context,
+    )
+    case.factory.agents[0].continue_error = error
+
+    outcome = case.runtime.resume(pause, {"scope": "workspace"})
+
+    assert outcome == Failed(stage="hitl-resumption", cause=error)

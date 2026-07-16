@@ -9,6 +9,7 @@ import agent_kernel
 
 assert agent_kernel.__version__ == "0.1.0"
 assert "agno" not in sys.modules
+assert not any(name.startswith("agent_kernel.integrations.agno") for name in sys.modules)
 assert "dspy" not in sys.modules
 """
     subprocess.run(
