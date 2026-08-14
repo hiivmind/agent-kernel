@@ -50,9 +50,7 @@ def test_continuation_snapshots_authority_vocabularies():
     modes.add("root")
     fields["other"] = {"root"}
 
-    assert continuation.authority_fields == {
-        "mode": frozenset({"safe"})
-    }
+    assert continuation.authority_fields == {"mode": frozenset({"safe"})}
     with pytest.raises(TypeError):
         continuation.authority_fields["mode"] = frozenset({"root"})  # type: ignore[index]
 
@@ -83,9 +81,7 @@ def test_registry_rejects_unconstructible_authority_vocabulary(
         name="spin",
         kind="privileged",
         build=build_chat,
-        continuation=ContinuationSpec(
-            authority_fields={field_name: values}
-        ),
+        continuation=ContinuationSpec(authority_fields={field_name: values}),
     )
     chat = ActionSpec(name="chat", kind="toolfree", build=build_chat)
 
@@ -113,11 +109,7 @@ def test_registry_rejects_when_no_authority_combination_builds_safe_default():
         name="spin",
         kind="privileged",
         build=build_chat,
-        continuation=ContinuationSpec(
-            authority_fields={
-                "mode": frozenset({"safe", "fast"})
-            }
-        ),
+        continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe", "fast"})}),
     )
 
     with pytest.raises(ConfigurationError, match="fallback"):

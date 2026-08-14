@@ -29,10 +29,7 @@ def _authority_vocabularies(
         if continuation is None:
             continue
         vocabularies[spec.name] = {
-            field_name: sorted(values)
-            for field_name, values in sorted(
-                continuation.authority_fields.items()
-            )
+            field_name: sorted(values) for field_name, values in sorted(continuation.authority_fields.items())
         }
     return dict(sorted(vocabularies.items()))
 
@@ -95,17 +92,13 @@ def load_artifact(
     expected_fingerprint = registry_fingerprint(registry)
     artifact_fingerprint = metadata.get("registry_fingerprint")
     if artifact_fingerprint != expected_fingerprint:
-        raise ConfigurationError(
-            "DSPy artifact registry fingerprint does not match the configured registry"
-        )
+        raise ConfigurationError("DSPy artifact registry fingerprint does not match the configured registry")
     if metadata.get("format_version") != _FORMAT_VERSION:
         raise ConfigurationError("unsupported DSPy artifact format version")
 
     program_name = metadata.get("program_path")
     if not isinstance(program_name, str) or program_name != path.name:
-        raise ConfigurationError(
-            "DSPy artifact metadata program path does not match the requested artifact"
-        )
+        raise ConfigurationError("DSPy artifact metadata program path does not match the requested artifact")
 
     module.load(metadata_path.parent / program_name)
     return module

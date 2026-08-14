@@ -192,9 +192,7 @@ def test_public_requirement_snapshot_cannot_mutate_private_response(plan):
     requirement = FakeRequirement([FakeField("sides")])
     response = paused_response(requirement)
     finished = completed_response()
-    runtime = make_runtime(
-        FakeAgentFactory(response, continue_responses=[finished])
-    )
+    runtime = make_runtime(FakeAgentFactory(response, continue_responses=[finished]))
     pause = runtime.execute("spin", plan)
     pause.requirements[0]["field"] = "delete_world"
 
@@ -415,9 +413,7 @@ def test_resume_can_pause_again_and_then_complete_on_same_agent(plan):
     assert second_pause.adapter_state is not first_pause.adapter_state
     assert second_pause.envelope is plan.envelope
     assert second_pause.runtime_context is context
-    assert tuple(
-        item["field"] for item in second_pause.requirements
-    ) == ("color",)
+    assert tuple(item["field"] for item in second_pause.requirements) == ("color",)
 
     outcome = runtime.resume(second_pause, {"color": "blue"})
 
@@ -425,7 +421,7 @@ def test_resume_can_pause_again_and_then_complete_on_same_agent(plan):
     assert len(factory.agents) == 1
     assert first_requirement.provided == [{"sides": "d20"}]
     assert second_requirement.provided == [{"color": "blue"}]
-    assert [
-        call[1]["dependencies"]["agent_kernel_authority"]
-        for call in factory.agents[0].continue_calls
-    ] == [plan.envelope, plan.envelope]
+    assert [call[1]["dependencies"]["agent_kernel_authority"] for call in factory.agents[0].continue_calls] == [
+        plan.envelope,
+        plan.envelope,
+    ]

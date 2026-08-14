@@ -60,9 +60,7 @@ class ExecutionPlan:
             string_tuple(self.instructions, field="execution plan instructions"),
         )
         if capabilities != self.envelope.allowed:
-            raise ConfigurationError(
-                "execution plan capabilities must equal authority envelope allowed"
-            )
+            raise ConfigurationError("execution plan capabilities must equal authority envelope allowed")
 
 
 @dataclass(frozen=True)

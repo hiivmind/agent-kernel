@@ -166,11 +166,7 @@ def test_run_falls_to_toolfree_default_for_invalid_required_authority_literal(
                 kind="privileged",
                 build=build_spin,
                 capabilities=frozenset({"spin_wheel"}),
-                continuation=ContinuationSpec(
-                    authority_fields={
-                        "mode": frozenset({"safe", "fast"})
-                    }
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe", "fast"})}),
             ),
         ),
         default="chat",
@@ -224,11 +220,7 @@ def test_run_uses_fully_valid_later_authority_value_for_safe_fallback(member):
                     grants=frozenset({"spin_wheel"}),
                 ),
                 capabilities=frozenset({"spin_wheel"}),
-                continuation=ContinuationSpec(
-                    authority_fields={
-                        "mode": frozenset({"fast", "safe"})
-                    }
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"fast", "safe"})}),
             ),
         ),
         default="chat",
@@ -285,9 +277,7 @@ def test_rewriting_fallback_validator_never_reaches_privileged_runtime(member):
                         grants=frozenset({"spin_wheel"}),
                     ),
                     capabilities=frozenset({"spin_wheel"}),
-                    continuation=ContinuationSpec(
-                        authority_fields={"mode": frozenset({"safe"})}
-                    ),
+                    continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe"})}),
                 ),
             ),
             default="chat",
@@ -316,11 +306,7 @@ def test_registry_skips_promoted_candidate_and_uses_later_safe_fallback(member):
 
         @model_validator(mode="after")
         def promote_only_fast(self):
-            if (
-                self.action == "chat"
-                and self.confidence == 0.0
-                and self.mode == "fast"
-            ):
+            if self.action == "chat" and self.confidence == 0.0 and self.mode == "fast":
                 object.__setattr__(self, "action", "spin")
                 object.__setattr__(self, "confidence", 1.0)
             return self
@@ -341,11 +327,7 @@ def test_registry_skips_promoted_candidate_and_uses_later_safe_fallback(member):
                     grants=frozenset({"spin_wheel"}),
                 ),
                 capabilities=frozenset({"spin_wheel"}),
-                continuation=ContinuationSpec(
-                    authority_fields={
-                        "mode": frozenset({"fast", "safe"})
-                    }
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"fast", "safe"})}),
             ),
         ),
         default="chat",
@@ -401,9 +383,7 @@ def test_classify_then_plan_cannot_promote_internal_fallback(member):
                     grants=frozenset({"spin_wheel"}),
                 ),
                 capabilities=frozenset({"spin_wheel"}),
-                continuation=ContinuationSpec(
-                    authority_fields={"mode": frozenset({"safe"})}
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe"})}),
             ),
         ),
         default="chat",
@@ -487,9 +467,7 @@ def test_run_composes_facade_and_executes_the_original_message(example, member):
     assert result.plan.action == "spin"
     assert result.outcome == Completed(content="ran spin", raw=None)
     assert classifier.calls == [("the original message", context)]
-    assert runtime.execute_calls == [
-        ("the original message", result.plan, runtime_context)
-    ]
+    assert runtime.execute_calls == [("the original message", result.plan, runtime_context)]
 
 
 def test_dispatch_normalizes_intent_and_executes_its_brief(example, member):
@@ -503,9 +481,7 @@ def test_dispatch_normalizes_intent_and_executes_its_brief(example, member):
     )
 
     assert result.plan.action == "spin"
-    assert runtime.execute_calls == [
-        ("deterministic request", result.plan, "runtime context")
-    ]
+    assert runtime.execute_calls == [("deterministic request", result.plan, "runtime context")]
 
 
 def test_runtime_execution_exception_becomes_failed_outcome(example, member):

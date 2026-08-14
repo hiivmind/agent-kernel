@@ -27,10 +27,7 @@ def _authority_vocabularies(registry: Registry[Any]) -> dict[str, tuple[str, ...
             continue
         for field_name, values in continuation.authority_fields.items():
             vocabularies.setdefault(field_name, set()).update(values)
-    return {
-        field_name: tuple(sorted(values))
-        for field_name, values in sorted(vocabularies.items())
-    }
+    return {field_name: tuple(sorted(values)) for field_name, values in sorted(vocabularies.items())}
 
 
 def _literal_type(values: tuple[str, ...]) -> Any:
@@ -45,15 +42,12 @@ def build_signature(
         "confidence, brief, and declared authority fields."
     ),
 ) -> type[dspy.Signature]:
-    action_names = tuple(
-        sorted(action for action in registry.actions if action != registry.denied)
-    )
+    action_names = tuple(sorted(action for action in registry.actions if action != registry.denied))
     authority_vocabularies = _authority_vocabularies(registry)
     collisions = sorted(_RESERVED_FIELDS.intersection(authority_vocabularies))
     if collisions:
         raise ConfigurationError(
-            "authority fields collide with reserved DSPy projection fields: "
-            + ", ".join(collisions)
+            "authority fields collide with reserved DSPy projection fields: " + ", ".join(collisions)
         )
 
     fields: dict[str, tuple[Any, Any]] = {
@@ -70,10 +64,7 @@ def build_signature(
         fields[field_name] = (
             _literal_type(values) | None,
             dspy.OutputField(
-                desc=(
-                    "A declared authority value when applicable to the selected "
-                    "action, otherwise null."
-                )
+                desc=("A declared authority value when applicable to the selected action, otherwise null.")
             ),
         )
     fields["confidence"] = (
@@ -141,11 +132,7 @@ class DspyClassifier(Generic[I]):
         if isinstance(prediction, Mapping):
             if "intent" in prediction:
                 return prediction["intent"]
-            return {
-                name: prediction[name]
-                for name in self.registry.intent_type.model_fields
-                if name in prediction
-            }
+            return {name: prediction[name] for name in self.registry.intent_type.model_fields if name in prediction}
 
         structured = getattr(prediction, "intent", _MISSING)
         if structured is not _MISSING:

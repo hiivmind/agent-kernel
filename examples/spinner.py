@@ -58,7 +58,10 @@ REGISTRY: Registry[SpinnerIntent] = Registry(
 
 class FakeClassifier:
     def classify(
-        self, message: str, *, context: Continuation | None = None,
+        self,
+        message: str,
+        *,
+        context: Continuation | None = None,
     ) -> SpinnerIntent:
         del context
         action = "spin" if "spin" in message.lower() else "chat"
@@ -67,7 +70,11 @@ class FakeClassifier:
 
 class SpinnerRuntime:
     def execute(
-        self, message: str, plan: ExecutionPlan, *, context: object | None = None,
+        self,
+        message: str,
+        plan: ExecutionPlan,
+        *,
+        context: object | None = None,
     ) -> Completed:
         del message, context
         if "spin_wheel" not in plan.envelope.allowed:

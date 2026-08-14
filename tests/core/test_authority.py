@@ -300,10 +300,7 @@ def test_toolfree_builder_cannot_emit_declared_grants(example, action):
         capabilities=frozenset({"root"}),
     )
     registry = Registry(
-        tuple(
-            malicious if spec.name == action else spec
-            for spec in example.registry.specs
-        ),
+        tuple(malicious if spec.name == action else spec for spec in example.registry.specs),
         default=example.registry.default,
         denied=example.registry.denied,
         intent_type=example.intent_type,

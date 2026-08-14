@@ -29,13 +29,9 @@ class Planner(Generic[I]):
     def _validate_grants(spec: ActionSpec[I], briefing: Briefing) -> None:
         undeclared = briefing.grants - spec.capabilities
         if undeclared:
-            raise ConfigurationError(
-                f"action {spec.name!r} built undeclared grants: {sorted(undeclared)}"
-            )
+            raise ConfigurationError(f"action {spec.name!r} built undeclared grants: {sorted(undeclared)}")
         if spec.kind == "toolfree" and briefing.grants:
-            raise ConfigurationError(
-                f"toolfree action {spec.name!r} built grants: {sorted(briefing.grants)}"
-            )
+            raise ConfigurationError(f"toolfree action {spec.name!r} built grants: {sorted(briefing.grants)}")
 
     def plan(self, intent: I, principal: Principal) -> ExecutionPlan:
         intent, valid = self.registry.normalize_intent(intent)
@@ -46,14 +42,8 @@ class Planner(Generic[I]):
         elif spec is None:
             reason = f"unknown action: {intent.action}"
             spec = self.registry.get(self.registry.default)
-        elif (
-            spec.kind == "privileged"
-            and intent.confidence < self.confidence_threshold
-        ):
-            reason = (
-                f"confidence {intent.confidence:.2f} "
-                f"< {self.confidence_threshold:.2f}"
-            )
+        elif spec.kind == "privileged" and intent.confidence < self.confidence_threshold:
+            reason = f"confidence {intent.confidence:.2f} < {self.confidence_threshold:.2f}"
             spec = self.registry.get(self.registry.default)
         elif spec.kind == "privileged" and spec.continuation is not None:
             for field_name, allowed_values in spec.continuation.authority_fields.items():
@@ -82,8 +72,7 @@ class Planner(Generic[I]):
 
         if not briefing.grants <= principal.role.capabilities:
             raise ConfigurationError(
-                f"final grants exceed principal authority: "
-                f"{sorted(briefing.grants - principal.role.capabilities)}"
+                f"final grants exceed principal authority: {sorted(briefing.grants - principal.role.capabilities)}"
             )
 
         return ExecutionPlan(
@@ -92,9 +81,7 @@ class Planner(Generic[I]):
             capabilities=briefing.grants,
             instructions=briefing.instructions,
             tool_call_limit=(
-                briefing.tool_call_limit
-                if briefing.tool_call_limit is not None
-                else spec.tool_call_limit
+                briefing.tool_call_limit if briefing.tool_call_limit is not None else spec.tool_call_limit
             ),
             reads_history=spec.reads_history,
             envelope=AuthorityEnvelope(principal.id, briefing.grants),

@@ -4,9 +4,7 @@ from typing import Any
 class UnsupportedRequirement(ValueError):
     def __init__(self, requirement_type: str):
         self.requirement_type = requirement_type
-        super().__init__(
-            f"Agno requirement type is not supported: {requirement_type}"
-        )
+        super().__init__(f"Agno requirement type is not supported: {requirement_type}")
 
 
 def _active_requirements(response: object) -> tuple[Any, ...]:
@@ -62,11 +60,7 @@ def translate_requirements(
 
         for field in getattr(requirement, "user_input_schema", None) or ():
             field_type = getattr(field, "field_type", None)
-            type_name = (
-                getattr(field_type, "__name__", str(field_type))
-                if field_type is not None
-                else None
-            )
+            type_name = getattr(field_type, "__name__", str(field_type)) if field_type is not None else None
             translated.append(
                 {
                     "field": getattr(field, "name", None),
@@ -91,16 +85,12 @@ def apply_user_input(
         for field in getattr(requirement, "user_input_schema", None) or ():
             field_name = getattr(field, "name", None)
             if not isinstance(field_name, str):
-                raise ValueError(
-                    "Agno user-input requirement has an invalid field name"
-                )
+                raise ValueError("Agno user-input requirement has an invalid field name")
             field_names.append(field_name)
 
         missing = [name for name in field_names if name not in answers]
         if missing:
-            raise ValueError(
-                f"missing answers for Agno user-input fields: {missing}"
-            )
+            raise ValueError(f"missing answers for Agno user-input fields: {missing}")
         prepared.append(
             (
                 requirement,
