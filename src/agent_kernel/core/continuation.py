@@ -31,9 +31,7 @@ class Continuation:
         if continuation_spec is None:
             return cls(last_action=spec.name)
 
-        bounded_awaiting = (
-            awaiting if awaiting in continuation_spec.awaiting else None
-        )
+        bounded_awaiting = awaiting if awaiting in continuation_spec.awaiting else None
         authority_values = []
         for field_name, allowed_values in continuation_spec.authority_fields.items():
             value = getattr(intent, field_name, None)

@@ -87,10 +87,7 @@ class AgnoRuntime:
             raise ConfigurationError(f"missing Agno tool bindings: {missing}")
 
         try:
-            selected_tools = [
-                self.tools[capability]
-                for capability in sorted(plan.capabilities)
-            ]
+            selected_tools = [self.tools[capability] for capability in sorted(plan.capabilities)]
             agent = self.agent_factory(
                 model=self.model,
                 tools=selected_tools,
@@ -137,23 +134,15 @@ class AgnoRuntime:
     ) -> RuntimeOutcome:
         record_key = pause.adapter_state
         if not isinstance(record_key, _PauseToken):
-            raise ConfigurationError(
-                "pause state was not created by this Agno runtime"
-            )
+            raise ConfigurationError("pause state was not created by this Agno runtime")
         record = self._pause_records.get(record_key)
         if record is None:
-            raise ConfigurationError(
-                "pause state was not created by this Agno runtime"
-            )
+            raise ConfigurationError("pause state was not created by this Agno runtime")
         response = record.response
         if pause.envelope != record.envelope:
-            raise ConfigurationError(
-                "pause authority envelope does not match the original run"
-            )
+            raise ConfigurationError("pause authority envelope does not match the original run")
         if requirement_state(response) != record.requirement_state:
-            raise ConfigurationError(
-                "paused Agno response state does not match the original run"
-            )
+            raise ConfigurationError("paused Agno response state does not match the original run")
 
         try:
             apply_user_input(response, answers)
@@ -162,11 +151,7 @@ class AgnoRuntime:
                 dependencies={
                     "agent_kernel_authority": record.envelope,
                 },
-                user_id=(
-                    record.context.user_id
-                    if record.context is not None
-                    else None
-                ),
+                user_id=(record.context.user_id if record.context is not None else None),
             )
             if getattr(resumed, "is_paused", False):
                 outcome = self._pause(

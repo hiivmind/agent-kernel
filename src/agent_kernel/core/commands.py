@@ -16,9 +16,7 @@ def parse_command(message: str, registry: Registry[I]) -> I | None:
         return None
 
     matches: list[CommandSpec[I]] = [
-        spec.command
-        for spec in registry.specs
-        if spec.command is not None and spec.command.name == name
+        spec.command for spec in registry.specs if spec.command is not None and spec.command.name == name
     ]
     if len(matches) != 1:
         return None

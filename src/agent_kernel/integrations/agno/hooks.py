@@ -13,9 +13,6 @@ def authority_hook(
 ) -> Any:
     dependencies = getattr(run_context, "dependencies", None) or {}
     envelope = dependencies.get("agent_kernel_authority")
-    if (
-        not isinstance(envelope, AuthorityEnvelope)
-        or function_name not in envelope.allowed
-    ):
+    if not isinstance(envelope, AuthorityEnvelope) or function_name not in envelope.allowed:
         raise PermissionError(f"principal may not call {function_name}")
     return function_call(**args)

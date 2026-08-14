@@ -82,9 +82,7 @@ def test_projected_signature_rejects_authority_field_colliding_with_reserved_fie
 
 def test_registry_fingerprint_is_stable_across_registry_declaration_order():
     first = registry_fingerprint(_registry())
-    reordered = registry_fingerprint(
-        _registry(specs=(SPIN, CHAT, DENIED))
-    )
+    reordered = registry_fingerprint(_registry(specs=(SPIN, CHAT, DENIED)))
 
     assert first == reordered
     assert re.fullmatch(r"[0-9a-f]{64}", first)
@@ -94,9 +92,7 @@ def test_registry_fingerprint_changes_with_intent_schema():
     class ExtendedIntent(ExampleIntent):
         source: str | None = None
 
-    assert registry_fingerprint(_registry()) != registry_fingerprint(
-        _registry(intent_type=ExtendedIntent)
-    )
+    assert registry_fingerprint(_registry()) != registry_fingerprint(_registry(intent_type=ExtendedIntent))
 
 
 def test_registry_fingerprint_changes_with_authority_vocabulary():
@@ -108,9 +104,7 @@ def test_registry_fingerprint_changes_with_authority_vocabulary():
         ),
     )
 
-    assert registry_fingerprint(_registry()) != registry_fingerprint(
-        _registry(specs=(CHAT, DENIED, changed_spin))
-    )
+    assert registry_fingerprint(_registry()) != registry_fingerprint(_registry(specs=(CHAT, DENIED, changed_spin)))
 
 
 class RecordingModule:
@@ -194,9 +188,7 @@ def test_classifier_does_not_use_fallback_after_success(example):
             mode=None,
         )
     )
-    fallback = RecordingFallback(
-        ExampleIntent(action="chat", confidence=0.1, brief="fallback")
-    )
+    fallback = RecordingFallback(ExampleIntent(action="chat", confidence=0.1, brief="fallback"))
 
     result = DspyClassifier(
         registry=example.registry,

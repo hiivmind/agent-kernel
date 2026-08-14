@@ -41,11 +41,7 @@ class FakeProgram:
 
 
 def _metadata_path(program_path):
-    candidates = [
-        candidate
-        for candidate in program_path.parent.iterdir()
-        if candidate != program_path
-    ]
+    candidates = [candidate for candidate in program_path.parent.iterdir() if candidate != program_path]
     assert len(candidates) == 1
     return candidates[0]
 
@@ -110,16 +106,12 @@ def test_load_artifact_rejects_registry_mismatch_before_dspy_load(
 def test_registry_fingerprint_binds_authority_values_to_each_action(example):
     spin_safe = replace(
         SPIN,
-        continuation=ContinuationSpec(
-            authority_fields={"mode": frozenset({"safe"})}
-        ),
+        continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe"})}),
     )
     review_fast = replace(
         SPIN,
         name="review",
-        continuation=ContinuationSpec(
-            authority_fields={"mode": frozenset({"fast"})}
-        ),
+        continuation=ContinuationSpec(authority_fields={"mode": frozenset({"fast"})}),
     )
     first = Registry(
         (CHAT, DENIED, spin_safe, review_fast),
@@ -133,15 +125,11 @@ def test_registry_fingerprint_binds_authority_values_to_each_action(example):
             DENIED,
             replace(
                 spin_safe,
-                continuation=ContinuationSpec(
-                    authority_fields={"mode": frozenset({"fast"})}
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"fast"})}),
             ),
             replace(
                 review_fast,
-                continuation=ContinuationSpec(
-                    authority_fields={"mode": frozenset({"safe"})}
-                ),
+                continuation=ContinuationSpec(authority_fields={"mode": frozenset({"safe"})}),
             ),
         ),
         default="chat",

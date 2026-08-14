@@ -74,9 +74,7 @@ class ContinuationSpec:
         snapshot: dict[str, frozenset[str]] = {}
         for field_name, values in self.authority_fields.items():
             if not isinstance(field_name, str) or not field_name.strip():
-                raise ConfigurationError(
-                    "continuation authority fields must be non-empty strings"
-                )
+                raise ConfigurationError("continuation authority fields must be non-empty strings")
             snapshot[field_name] = capability_set(
                 values,
                 field="continuation authority values",
@@ -122,33 +120,18 @@ class Registry(Generic[I]):
         for spec in self._specs.values():
             if spec.continuation is None:
                 continue
-            for field_name, declared_values in (
-                spec.continuation.authority_fields.items()
-            ):
+            for field_name, declared_values in spec.continuation.authority_fields.items():
                 model_field = intent_type.model_fields.get(field_name)
-                if (
-                    field_name in {"action", "confidence", "brief"}
-                    or model_field is None
-                    or not declared_values
-                ):
-                    raise ConfigurationError(
-                        f"invalid authority vocabulary for field {field_name!r}"
-                    )
-                authority_values.setdefault(field_name, set()).update(
-                    declared_values
-                )
+                if field_name in {"action", "confidence", "brief"} or model_field is None or not declared_values:
+                    raise ConfigurationError(f"invalid authority vocabulary for field {field_name!r}")
+                authority_values.setdefault(field_name, set()).update(declared_values)
         authority_fields = tuple(sorted(authority_values))
-        authority_options = tuple(
-            tuple(sorted(authority_values[field_name]))
-            for field_name in authority_fields
-        )
+        authority_options = tuple(tuple(sorted(authority_values[field_name])) for field_name in authority_fields)
         candidate_count = 1
         for options in authority_options:
             candidate_count *= len(options)
         if candidate_count > _MAX_FALLBACK_CANDIDATES:
-            raise ConfigurationError(
-                "authority vocabularies produce too many fallback candidates"
-            )
+            raise ConfigurationError("authority vocabularies produce too many fallback candidates")
 
         validated_fallback: I | None = None
         for candidate_values in product(*authority_options):
@@ -157,9 +140,7 @@ class Registry(Generic[I]):
                 "confidence": 0.0,
                 "brief": "",
             }
-            candidate.update(
-                zip(authority_fields, candidate_values, strict=True)
-            )
+            candidate.update(zip(authority_fields, candidate_values, strict=True))
             try:
                 validated_fallback = intent_type.model_validate(candidate)
             except ValidationError:
@@ -173,12 +154,8 @@ class Registry(Generic[I]):
                 continue
             break
         if validated_fallback is None:
-            raise ConfigurationError(
-                "authority vocabularies cannot construct a valid fallback intent"
-            )
-        self._fallback_payload = MappingProxyType(
-            deepcopy(validated_fallback.model_dump(mode="python"))
-        )
+            raise ConfigurationError("authority vocabularies cannot construct a valid fallback intent")
+        self._fallback_payload = MappingProxyType(deepcopy(validated_fallback.model_dump(mode="python")))
         self.default = default
         self.denied = denied
         self.intent_type = intent_type
@@ -195,14 +172,8 @@ class Registry(Generic[I]):
         return self._specs.get(action)
 
     def _check_fallback_invariants(self, intent: I) -> None:
-        if (
-            intent.action != self.default
-            or not isfinite(intent.confidence)
-            or intent.confidence != 0.0
-        ):
-            raise ConfigurationError(
-                "validated fallback intent changed its safety invariants"
-            )
+        if intent.action != self.default or not isfinite(intent.confidence) or intent.confidence != 0.0:
+            raise ConfigurationError("validated fallback intent changed its safety invariants")
 
     def normalize_intent(self, value: object) -> tuple[I, bool]:
         force_fallback = bool(getattr(value, _FALLBACK_MARKER, False))

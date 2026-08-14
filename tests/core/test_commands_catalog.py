@@ -49,10 +49,7 @@ def test_command_normalizing_to_unknown_action_falls_to_registered_default(examp
         ),
     )
     registry = Registry(
-        tuple(
-            unsafe_spin if spec.name == "spin" else spec
-            for spec in example.registry.specs
-        ),
+        tuple(unsafe_spin if spec.name == "spin" else spec for spec in example.registry.specs),
         default=example.registry.default,
         denied=example.registry.denied,
         intent_type=example.intent_type,
@@ -100,10 +97,7 @@ def test_catalog_visibility_uses_conservative_maximum_declared_envelope(
         build=lambda intent, context: Briefing(instructions=("preview",)),
     )
     registry = Registry(
-        tuple(
-            branch_without_grants if spec.name == "spin" else spec
-            for spec in example.registry.specs
-        ),
+        tuple(branch_without_grants if spec.name == "spin" else spec for spec in example.registry.specs),
         default=example.registry.default,
         denied=example.registry.denied,
         intent_type=example.intent_type,
@@ -121,9 +115,7 @@ def test_catalog_visibility_uses_conservative_maximum_declared_envelope(
 
 
 def test_core_guide_documents_conservative_catalog_visibility():
-    guide = (
-        Path(__file__).parents[2] / "docs/core-quickstart.md"
-    ).read_text(encoding="utf-8")
+    guide = (Path(__file__).parents[2] / "docs/core-quickstart.md").read_text(encoding="utf-8")
 
     assert "catalog visibility is conservative" in guide.lower()
     assert "maximum declared capabilities" in guide.lower()

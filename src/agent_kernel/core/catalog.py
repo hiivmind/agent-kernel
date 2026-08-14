@@ -18,19 +18,12 @@ def describe(
 ) -> tuple[dict[str, str | None], ...]:
     visible: list[CatalogEntry] = []
     for spec in planner.registry.specs:
-        if (
-            spec.kind == "privileged"
-            and not spec.capabilities <= principal.role.capabilities
-        ):
+        if spec.kind == "privileged" and not spec.capabilities <= principal.role.capabilities:
             continue
         visible.extend(spec.catalog)
 
     visible_keys = {entry.key for entry in visible}
-    current = (
-        entry
-        for entry in visible
-        if entry.superseded_by is None or entry.superseded_by not in visible_keys
-    )
+    current = (entry for entry in visible if entry.superseded_by is None or entry.superseded_by not in visible_keys)
     return tuple(
         {
             "key": entry.key,
