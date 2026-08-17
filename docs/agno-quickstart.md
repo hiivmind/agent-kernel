@@ -49,3 +49,37 @@ print(turn.outcome)
 hardcoded. Classification has no tools. Execution exposes only tools named by
 the authorized plan, stamps the immutable authority envelope into Agno's run
 dependencies, and fails closed when a binding is missing.
+
+## Host the kernel in AgentOS
+
+```python
+from agno.db.sqlite import SqliteDb
+from agno.os import AgentOS
+from agent_kernel.integrations.agno import KernelAgent
+
+db = SqliteDb(db_file="tmp/spinner-agentos.db")
+hosted = KernelAgent(
+    id="kernel-spinner",
+    name="Kernel Spinner",
+    description="A capability-gated spinner",
+    kernel=kernel,
+    principal=principal,
+    db=db,
+)
+agent_os = AgentOS(id="kernel-spinner-os", agents=[hosted], db=db)
+app = agent_os.get_app()
+
+if __name__ == "__main__":
+    agent_os.serve(app=app, port=7777)
+```
+
+`KernelAgent` is a hosting adapter: it gives AgentOS access to the configured
+kernel without adding a wrapper LLM. The kernel's inner `AgnoRuntime` still
+enforces its authorized execution plan, using the application-supplied
+`Principal`. Each AgentOS run invokes that configured kernel exactly once.
+
+Streaming is reconstructed only after the kernel completes rather than emitted
+token by token. Within AgentOS's base started/completed lifecycle events, the
+adapter emits each recorded tool-start/tool-completed pair in its original
+order, followed by exactly one final content event. Native HITL continuation
+and background or resumable AgentOS runs are not yet supported.
