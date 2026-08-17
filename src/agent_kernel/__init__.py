@@ -3,14 +3,16 @@ from agent_kernel.core.continuation import Continuation
 from agent_kernel.core.errors import ConfigurationError
 from agent_kernel.core.intents import Intent
 from agent_kernel.core.kernel import Kernel, KernelConfig
-from agent_kernel.core.protocols import Classifier, Runtime
+from agent_kernel.core.protocols import Classifier, PrincipalResolver, Runtime
 from agent_kernel.core.results import (
     AuthorityEnvelope,
+    AuthorityScope,
     Completed,
     ExecutionPlan,
     Failed,
     Pause,
     Principal,
+    ResourceAuthority,
     Role,
     RuntimeOutcome,
     TurnResult,
@@ -30,6 +32,7 @@ __version__ = "0.1.0"
 __all__ = [
     "ActionSpec",
     "AuthorityEnvelope",
+    "AuthorityScope",
     "Briefing",
     "BuildContext",
     "CatalogEntry",
@@ -47,7 +50,9 @@ __all__ = [
     "Pause",
     "Planner",
     "Principal",
+    "PrincipalResolver",
     "Registry",
+    "ResourceAuthority",
     "Role",
     "Runtime",
     "RuntimeOutcome",

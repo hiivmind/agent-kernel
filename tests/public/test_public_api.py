@@ -1,6 +1,7 @@
 def test_supported_core_api_is_top_level():
     from agent_kernel import (
         ActionSpec,
+        AuthorityScope,
         Briefing,
         Completed,
         Continuation,
@@ -11,6 +12,7 @@ def test_supported_core_api_is_top_level():
         Pause,
         Principal,
         Registry,
+        ResourceAuthority,
         Role,
         TurnResult,
     )
@@ -18,6 +20,7 @@ def test_supported_core_api_is_top_level():
     assert all(
         (
             ActionSpec,
+            AuthorityScope,
             Briefing,
             Completed,
             Continuation,
@@ -28,6 +31,7 @@ def test_supported_core_api_is_top_level():
             Pause,
             Principal,
             Registry,
+            ResourceAuthority,
             Role,
             TurnResult,
         )
